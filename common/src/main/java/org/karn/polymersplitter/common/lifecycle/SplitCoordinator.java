@@ -149,6 +149,10 @@ public final class SplitCoordinator {
         return registry;
     }
 
+    public SplitterConfig config() {
+        return config;
+    }
+
     public Path outputRoot() {
         return outputRoot;
     }
