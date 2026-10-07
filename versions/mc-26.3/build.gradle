@@ -9,6 +9,7 @@ ext {
     fabric_api_version = "0.160.5+26.3"
     polymer_version = "0.18.2+26.3"
     java_version = 25
+    adapter_source = "versions/modern/src/main/java"
 }
 
 apply from: rootProject.file("gradle/version-module.gradle")

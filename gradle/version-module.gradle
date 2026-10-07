@@ -5,6 +5,7 @@ base {
 sourceSets {
     main {
         java.srcDir rootProject.file("versions/shared/src/main/java")
+        java.srcDir rootProject.file(adapter_source)
         resources.srcDir rootProject.file("versions/shared/src/main/resources")
     }
 }
