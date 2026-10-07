@@ -344,13 +344,16 @@ For each namespace:
 2. Verify every referenced blob before it becomes a reuse candidate.
 3. Compute the namespace fingerprint.
 4. If the compatible verified cache has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
-5. Otherwise write one temporary ZIP inside `hosted/`.
-6. Compute the final ZIP SHA-1.
-7. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
-8. Register the content-addressed hosted ID.
-9. After all namespaces are ready, atomically replace `index.json` with the current compatibility key.
+5. Otherwise write one temporary ZIP inside `hosted/`. A SHA-1 `DigestOutputStream` wraps the raw file stream below `ZipOutputStream`, so the hash covers the exact emitted compressed ZIP bytes, including the central directory, without reopening the completed temporary file.
+6. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
+7. Register the content-addressed hosted ID.
+8. After all namespaces are ready, atomically replace `index.json` with the current compatibility key.
 
 A failed publication can leave an unreferenced immutable blob, but cannot remap an issued URL or advance the current index. A whole-source fast-path hit creates no new blob and does not rewrite the index.
+
+### Split I/O behavior
+
+Each `PackSplitter.split()` invocation allocates one reusable 64 KiB byte buffer. Fingerprint reads and ZIP-entry copies use that same buffer sequentially rather than allocating a new buffer per entry. Newly written namespace ZIPs are SHA-1 hashed while bytes are emitted; the completed temporary ZIP is not reopened solely to calculate its final hash. Existing content-addressed blobs may still be reread when an integrity check is required.
 
 ### Startup read and verification
 

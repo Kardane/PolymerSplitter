@@ -22,7 +22,7 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Split delivery is enabled only for explicitly supported built-in local AutoHost providers.
 - Preserve Polymer's required/prompt policy when automatically or manually pushing packs.
 - Keep namespace UUIDs stable. The primary pack uses Polymer's main UUID; non-primary packs use deterministic namespace UUIDs.
-- Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs.
+- Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs. For newly written namespace ZIPs, hash the emitted ZIP bytes in-stream; do not add a second full-file SHA-1 pass unless verifying an already-existing blob.
 - Never remap an already issued content-addressed URL to different bytes.
 - Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
 - `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.

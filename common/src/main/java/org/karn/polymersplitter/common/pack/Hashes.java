@@ -31,6 +31,10 @@ public final class Hashes {
         return hex(digest.digest());
     }
 
+    public static MessageDigest sha1() {
+        return digest("SHA-1");
+    }
+
     public static MessageDigest sha256() {
         return digest("SHA-256");
     }

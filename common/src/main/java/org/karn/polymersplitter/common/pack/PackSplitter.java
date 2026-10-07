@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.DigestOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -27,6 +28,7 @@ public final class PackSplitter {
     private static final String PACK_ICON = "pack.png";
     private static final String MCASSETS_ROOT = "assets/.mcassetsroot";
     private static final LocalDateTime DETERMINISTIC_TIME = LocalDateTime.of(1980, 1, 1, 0, 0);
+    private static final int IO_BUFFER_SIZE = 64 * 1024;
     private static final byte[] FINGERPRINT_SCHEMA =
             "polymersplitter:namespace-fingerprint:v2".getBytes(StandardCharsets.UTF_8);
 
@@ -46,6 +48,7 @@ public final class PackSplitter {
         }
 
         Path hostedDirectory = HostedPackStore.directory(outputRoot);
+        byte[] ioBuffer = new byte[IO_BUFFER_SIZE];
 
         Map<String, SplitPack> reusableByNamespace = new HashMap<>();
         for (SplitPack pack : reusablePacks) {
@@ -65,7 +68,8 @@ public final class PackSplitter {
                     zip,
                     packMeta,
                     packIcon,
-                    layout.sharedRootEntries()
+                    layout.sharedRootEntries(),
+                    ioBuffer
             );
 
             List<SplitPack> packs = new ArrayList<>(layout.byNamespace().size());
@@ -74,7 +78,8 @@ public final class PackSplitter {
                 String fingerprint = fingerprintNamespace(
                         zip,
                         sharedFingerprint,
-                        namespaceEntry.getValue()
+                        namespaceEntry.getValue(),
+                        ioBuffer
                 );
 
                 SplitPack reusable = reusableByNamespace.get(namespace);
@@ -97,32 +102,31 @@ public final class PackSplitter {
                 );
 
                 try {
-                    writeNamespacePack(
+                    WrittenZip written = writeNamespacePack(
                             zip,
                             packMeta,
                             packIcon,
                             layout.sharedRootEntries(),
                             namespaceEntry.getValue(),
                             temp,
-                            config.deterministicZip()
+                            config.deterministicZip(),
+                            ioBuffer
                     );
 
-                    String sha1 = Hashes.sha1(temp);
-                    long size = Files.size(temp);
                     Path hosted = HostedPackStore.commitGeneratedBlob(
                             outputRoot,
                             temp,
-                            sha1,
-                            size
+                            written.sha1(),
+                            written.size()
                     );
 
                     packs.add(new SplitPack(
                             namespace,
                             hosted,
                             fingerprint,
-                            sha1,
+                            written.sha1(),
                             PackIdUtil.uuidForNamespace(namespace),
-                            size
+                            written.size()
                     ));
                 } finally {
                     Files.deleteIfExists(temp);
@@ -234,20 +238,21 @@ public final class PackSplitter {
             ZipFile zip,
             ZipEntry packMeta,
             ZipEntry packIcon,
-            List<ZipEntry> sharedRootEntries
+            List<ZipEntry> sharedRootEntries,
+            byte[] ioBuffer
     ) throws IOException {
         MessageDigest digest = Hashes.sha256();
         digest.update(FINGERPRINT_SCHEMA);
         digest.update((byte) 0);
 
-        updateDigest(zip, packMeta, PACK_META, digest);
+        updateDigest(zip, packMeta, PACK_META, digest, ioBuffer);
 
         if (packIcon != null && !packIcon.isDirectory()) {
-            updateDigest(zip, packIcon, PACK_ICON, digest);
+            updateDigest(zip, packIcon, PACK_ICON, digest, ioBuffer);
         }
 
         for (ZipEntry entry : sharedRootEntries) {
-            updateDigest(zip, entry, validateEntryName(entry.getName()), digest);
+            updateDigest(zip, entry, validateEntryName(entry.getName()), digest, ioBuffer);
         }
 
         return digest.digest();
@@ -256,13 +261,14 @@ public final class PackSplitter {
     private static String fingerprintNamespace(
             ZipFile zip,
             byte[] sharedFingerprint,
-            List<ZipEntry> entries
+            List<ZipEntry> entries,
+            byte[] ioBuffer
     ) throws IOException {
         MessageDigest digest = Hashes.sha256();
         digest.update(sharedFingerprint);
 
         for (ZipEntry entry : entries) {
-            updateDigest(zip, entry, validateEntryName(entry.getName()), digest);
+            updateDigest(zip, entry, validateEntryName(entry.getName()), digest, ioBuffer);
         }
 
         return Hashes.hex(digest.digest());
@@ -272,38 +278,42 @@ public final class PackSplitter {
             ZipFile zip,
             ZipEntry entry,
             String outputName,
-            MessageDigest digest
+            MessageDigest digest,
+            byte[] ioBuffer
     ) throws IOException {
         digest.update(outputName.getBytes(StandardCharsets.UTF_8));
         digest.update((byte) 0);
 
-        byte[] buffer = new byte[64 * 1024];
         try (InputStream input = zip.getInputStream(entry)) {
             int read;
-            while ((read = input.read(buffer)) != -1) {
-                digest.update(buffer, 0, read);
+            while ((read = input.read(ioBuffer)) != -1) {
+                digest.update(ioBuffer, 0, read);
             }
         }
 
         digest.update((byte) 0);
     }
 
-    private static void writeNamespacePack(
+    private static WrittenZip writeNamespacePack(
             ZipFile source,
             ZipEntry packMeta,
             ZipEntry packIcon,
             List<ZipEntry> sharedRootEntries,
             List<ZipEntry> assetEntries,
             Path target,
-            boolean deterministic
+            boolean deterministic,
+            byte[] ioBuffer
     ) throws IOException {
-        try (OutputStream rawOutput = Files.newOutputStream(target);
-             ZipOutputStream output = new ZipOutputStream(rawOutput)) {
+        MessageDigest sha1 = Hashes.sha1();
 
-            copyEntry(source, packMeta, PACK_META, output, deterministic);
+        try (OutputStream rawOutput = Files.newOutputStream(target);
+             DigestOutputStream digestOutput = new DigestOutputStream(rawOutput, sha1);
+             ZipOutputStream output = new ZipOutputStream(digestOutput)) {
+
+            copyEntry(source, packMeta, PACK_META, output, deterministic, ioBuffer);
 
             if (packIcon != null && !packIcon.isDirectory()) {
-                copyEntry(source, packIcon, PACK_ICON, output, deterministic);
+                copyEntry(source, packIcon, PACK_ICON, output, deterministic, ioBuffer);
             }
 
             for (ZipEntry entry : sharedRootEntries) {
@@ -312,7 +322,8 @@ public final class PackSplitter {
                         entry,
                         validateEntryName(entry.getName()),
                         output,
-                        deterministic
+                        deterministic,
+                        ioBuffer
                 );
             }
 
@@ -322,10 +333,16 @@ public final class PackSplitter {
                         entry,
                         validateEntryName(entry.getName()),
                         output,
-                        deterministic
+                        deterministic,
+                        ioBuffer
                 );
             }
         }
+
+        return new WrittenZip(
+                Hashes.hex(sha1.digest()),
+                Files.size(target)
+        );
     }
 
     private static void copyEntry(
@@ -333,7 +350,8 @@ public final class PackSplitter {
             ZipEntry sourceEntry,
             String outputName,
             ZipOutputStream output,
-            boolean deterministic
+            boolean deterministic,
+            byte[] ioBuffer
     ) throws IOException {
         ZipEntry outputEntry = new ZipEntry(outputName);
         if (deterministic) {
@@ -344,7 +362,10 @@ public final class PackSplitter {
 
         output.putNextEntry(outputEntry);
         try (InputStream input = source.getInputStream(sourceEntry)) {
-            input.transferTo(output);
+            int read;
+            while ((read = input.read(ioBuffer)) != -1) {
+                output.write(ioBuffer, 0, read);
+            }
         }
         output.closeEntry();
     }
@@ -372,6 +393,9 @@ public final class PackSplitter {
         if (!ResourceNamespaces.isValid(namespace)) {
             throw new IOException("Invalid resource namespace: " + namespace);
         }
+    }
+
+    private record WrittenZip(String sha1, long size) {
     }
 
     private record PackLayout(
