@@ -318,10 +318,12 @@ copyPackIcon
 deterministicZip
 minSplitPackSizeMb
 compressionLevel
+includeNamespaces
+excludeNamespaces
 minSplitPackSizeMb
 ```
 
-`logPackSizes` is diagnostic only and does not affect output compatibility. Small-pack threshold and ZIP compression level do affect output and therefore participate in compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
+`logPackSizes` and hosted-blob retention are operational settings and do not affect output compatibility. Small-pack threshold, ZIP compression level, and namespace include/exclude policy do affect output and therefore participate in compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
 
 Configuration and cache-index writes create same-directory temporary JSON files with explicit POSIX mode `0644` before atomic replacement. This prevents the default restrictive temporary-file permissions from making root-generated JSON unreadable to an administrator's SFTP account. Non-POSIX filesystems retain their normal temporary-file behavior. Configuration loading adds a missing `minSplitPackSizeMb` field with default `30`, preserving other JSON fields through an atomic save. Cache reads remain non-mutating. Older `0600` files otherwise require an explicit permission adjustment or a later write. This permission policy applies only to non-secret settings/cache JSON, not arbitrary files or credentials.
 
@@ -400,7 +402,7 @@ Likewise, the previous format-2 `index.json` is readable for explicit incompatib
 
 Historical content-addressed blobs are retained for the entire running server so already-issued URLs remain valid. They are not garbage-collected during rebuilds.
 
-After a later server start successfully restores the current `index.json`, blobs not referenced by that index are safe to remove because prior-process AutoHost mappings have been cleared. Cleanup is best-effort and never changes the active index.
+After a later server start successfully restores the current `index.json`, blobs not referenced by that index are eligible for cleanup because prior-process AutoHost mappings have been cleared. `unreferencedBlobRetentionDays` controls that safe-point cleanup: `0` removes eligible blobs immediately, a positive value retains each blob until its filesystem modification time is at least that many days old, and `-1` disables automatic hosted-blob GC. Cleanup is best-effort and never changes the active index.
 
 Interrupted temporary files are removed on startup. Legacy generation directories and `current-cache.tsv` are cleanup-only artifacts after a current format-3 index has been committed.
 
@@ -492,15 +494,20 @@ For legacy 1.21.x, Polymer's provider has its own generation-ready state. The sp
   "deterministicZip": true,
   "logPackSizes": true,
   "minSplitPackSizeMb": 30,
-  "compressionLevel": 6
+  "compressionLevel": 6,
+  "includeNamespaces": [],
+  "excludeNamespaces": [],
+  "unreferencedBlobRetentionDays": 0
 }
 ```
 
 Only `namespace` split mode is supported. `compressionLevel` accepts `0` through `9`; the default is `6`.
 
+Namespace include/exclude policy is merge-only: it controls whether a non-primary namespace remains an independent pack or is folded into the primary pack. It never removes resource entries. Empty `includeNamespaces` means no allowlist restriction; otherwise only listed namespaces are independent candidates. `excludeNamespaces` has precedence and forces a namespace into the primary pack. The primary namespace itself is never removed. The size threshold is evaluated only after namespace policy allows a namespace to remain independent.
+
 `/polymersplitter reload` reparses the configuration and atomically replaces the coordinator's immutable `SplitterConfig`/output-compatibility pair. `logPackSizes` therefore changes immediately, while output-affecting settings apply to the next Polymer generation. The currently published READY generation is not invalidated merely because configuration changed. A rebuild can be requested explicitly to generate output under the new compatibility key.
 
-`enabled` remains startup-scoped. If reload observes a different configured value, the command reports that a server restart is required and the effective runtime enabled state is left unchanged.
+`enabled` remains startup-scoped. If reload observes a different configured value, the command reports that a server restart is required and the effective runtime enabled state is left unchanged. Hosted-blob retention changes are loaded immediately but are acted on only at the next successful startup restore, never by a runtime rebuild.
 
 When disabled at startup, PolymerSplitter does not register its split collector/generation hook, and Polymer AutoHost keeps its normal behavior.
 

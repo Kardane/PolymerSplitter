@@ -215,6 +215,8 @@ public final class SplitCacheIndex {
         );
         outputObject.addProperty("minSplitPackSizeMb", outputCompatibility.minSplitPackSizeMb());
         outputObject.addProperty("compressionLevel", outputCompatibility.compressionLevel());
+        outputObject.add("includeNamespaces", stringArray(outputCompatibility.includeNamespaces()));
+        outputObject.add("excludeNamespaces", stringArray(outputCompatibility.excludeNamespaces()));
         rootObject.add("output", outputObject);
 
         JsonArray array = new JsonArray();
@@ -282,6 +284,10 @@ public final class SplitCacheIndex {
                 ? 0 : requireInt(output, "minSplitPackSizeMb");
         int compressionLevel = algorithmVersion < 4
                 ? 6 : requireInt(output, "compressionLevel");
+        List<String> includeNamespaces = algorithmVersion < 5
+                ? List.of() : requireStringArray(output, "includeNamespaces");
+        List<String> excludeNamespaces = algorithmVersion < 5
+                ? List.of() : requireStringArray(output, "excludeNamespaces");
 
         try {
             return new OutputCompatibility(
@@ -289,11 +295,42 @@ public final class SplitCacheIndex {
                     copyPackIcon,
                     deterministicZip,
                     minSplitPackSizeMb,
-                    compressionLevel
+                    compressionLevel,
+                    includeNamespaces,
+                    excludeNamespaces
             );
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid output compatibility metadata", e);
         }
+    }
+
+    private static JsonArray stringArray(List<String> values) {
+        JsonArray array = new JsonArray();
+        for (String value : values) {
+            array.add(value);
+        }
+        return array;
+    }
+
+    private static List<String> requireStringArray(
+            JsonObject object,
+            String name
+    ) throws IOException {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonArray()) {
+            throw new IOException("Split cache index field '" + name + "' must be an array");
+        }
+
+        List<String> values = new ArrayList<>();
+        for (JsonElement item : element.getAsJsonArray()) {
+            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
+                throw new IOException(
+                        "Split cache index field '" + name + "' must contain only strings"
+                );
+            }
+            values.add(item.getAsString());
+        }
+        return List.copyOf(values);
     }
 
     private static String requireString(JsonObject object, String name) throws IOException {

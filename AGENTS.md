@@ -26,7 +26,9 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Never remap an already issued content-addressed URL to different bytes.
 - Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
 - `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.
-- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip` + `minSplitPackSizeMb` + `compressionLevel`. Diagnostic settings such as `logPackSizes` are not output compatibility.
+- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip` + `minSplitPackSizeMb` + `compressionLevel` + normalized namespace include/exclude policy. Diagnostic/retention settings are not output compatibility.
+- Namespace include/exclude policy must never drop resources: policy-excluded non-primary namespaces are merged into the primary pack; exclude takes precedence over include.
+- Hosted-blob retention is enforced only at a safe startup restore point. Runtime rebuilds must never garbage-collect historical content-addressed blobs.
 - Config reload may update the coordinator's immutable split config for future generations, but must not invalidate the currently published READY generation. `enabled` remains startup-scoped unless lifecycle hook registration is explicitly redesigned.
 - Whole-source fast reuse is allowed only when source SHA-1 matches a compatible, fully verified index. It may skip splitting/fingerprinting/index rewrite, but must still complete hosted registration before publishing READY.
 - Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Incompatible or metadata-free old caches are cache misses, not current output. Mutation belongs only to generation, legacy blob import, or explicit cleanup.

@@ -185,12 +185,22 @@ public final class PolymerSplitterCommands {
             source.sendSuccess(() -> message("Config reloaded", ChatFormatting.GREEN)
                     .append(field("compressionLevel", config.compressionLevel(), ChatFormatting.WHITE))
                     .append(field("minSplitPackSizeMb", config.minSplitPackSizeMb(), ChatFormatting.WHITE))
+                    .append(field("includeNamespaces", config.includeNamespaces().size(), ChatFormatting.WHITE))
+                    .append(field("excludeNamespaces", config.excludeNamespaces().size(), ChatFormatting.WHITE))
+                    .append(field("retentionDays", config.unreferencedBlobRetentionDays(), ChatFormatting.WHITE))
                     .append(field("outputChanged", result.outputSettingsChanged(),
                             result.outputSettingsChanged() ? ChatFormatting.YELLOW : ChatFormatting.GRAY)), false);
 
             if (result.outputSettingsChanged()) {
                 source.sendSuccess(() -> message(
                         "Output settings will apply to the next Polymer generation; run /polymersplitter rebuild to apply them now",
+                        ChatFormatting.YELLOW
+                ), false);
+            }
+
+            if (result.retentionPolicyChanged()) {
+                source.sendSuccess(() -> message(
+                        "Blob retention policy will apply at the next successful startup cache restore",
                         ChatFormatting.YELLOW
                 ), false);
             }

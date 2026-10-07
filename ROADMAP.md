@@ -266,7 +266,7 @@ Optimize generation after correctness and lifecycle behavior are stable.
 
 ## Phase 18 — Advanced configuration
 
-**Status:** in progress
+**Status:** completed
 
 Expose additional policy only after the underlying semantics are implemented.
 
@@ -274,15 +274,15 @@ Expose additional policy only after the underlying semantics are implemented.
 
 - `minSplitPackSizeMb` controls small-namespace merging and participates in output compatibility.
 - `compressionLevel` controls ZIP deflate level from `0` through `9` and participates in output compatibility.
-- `/polymersplitter reload` reloads the configuration without discarding the current READY generation.
+- `includeNamespaces` optionally restricts which non-primary namespaces may remain independent; all others are safely merged into the primary pack.
+- `excludeNamespaces` forces matching non-primary namespaces into the primary pack and takes precedence over the include list.
+- Namespace policy never drops resources, and the primary namespace always remains.
+- `/polymersplitter reload` reloads configuration without discarding the current READY generation.
 - Diagnostic-only settings such as `logPackSizes` take effect immediately after reload.
 - Output-affecting settings take effect on the next Polymer generation; operators can use `/polymersplitter rebuild` to apply them immediately.
 - `enabled` remains startup-scoped and reload reports when a restart is required.
-
-### Deferred policy
-
-- Namespace include/exclude policy remains undefined; excluded resources must never simply disappear and need explicit merge/fallback semantics before implementation.
-- Generation-count retention does not match the current single-index/content-addressed-blob storage model. If retention becomes necessary, define it in terms of unreferenced hosted blobs rather than removed generation directories.
+- `unreferencedBlobRetentionDays` defines hosted-blob retention at the safe startup cleanup point: `0` removes unreferenced blobs on the next successful restore, positive values retain them by age, and `-1` disables automatic blob GC.
+- Retention policy is intentionally blob-based rather than generation-count-based because the current storage model has one active index and immutable content-addressed blobs.
 
 ## Phase 19 — Operational commands
 

@@ -5,6 +5,8 @@ import org.karn.polymersplitter.common.io.AtomicFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -80,8 +82,18 @@ public final class SplitRecovery {
 
     public static int cleanupUnreferencedHostedBlobs(
             Path outputRoot,
-            List<SplitPack> activePacks
+            List<SplitPack> activePacks,
+            int retentionDays
     ) throws IOException {
+        if (retentionDays < -1) {
+            throw new IllegalArgumentException(
+                    "retentionDays must be -1 or non-negative"
+            );
+        }
+        if (retentionDays == -1) {
+            return 0;
+        }
+
         Path root = outputRoot.toAbsolutePath().normalize();
         Path hosted = root.resolve(HostedPackStore.DIRECTORY_NAME);
 
@@ -94,6 +106,10 @@ public final class SplitRecovery {
             keep.add(pack.sha1() + ".zip");
         }
 
+        Instant cutoff = retentionDays == 0
+                ? null
+                : Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+
         int deleted = 0;
         try (var entries = Files.list(hosted)) {
             for (Path entry : entries.toList()) {
@@ -101,6 +117,11 @@ public final class SplitRecovery {
                 if (!Files.isRegularFile(entry)
                         || !HOSTED_BLOB.matcher(name).matches()
                         || keep.contains(name)) {
+                    continue;
+                }
+
+                if (cutoff != null
+                        && Files.getLastModifiedTime(entry).toInstant().isAfter(cutoff)) {
                     continue;
                 }
 

@@ -118,7 +118,8 @@ public final class PolymerSplitter implements ModInitializer {
                     try {
                         int deletedBlobs = SplitRecovery.cleanupUnreferencedHostedBlobs(
                                 coordinator.outputRoot(),
-                                restored.get()
+                                restored.get(),
+                                config.unreferencedBlobRetentionDays()
                         );
                         if (deletedBlobs > 0) {
                             LOGGER.log(System.Logger.Level.INFO,
@@ -149,6 +150,7 @@ public final class PolymerSplitter implements ModInitializer {
         PolymerSplitterConfig reloaded = PolymerSplitterConfig.load(configPath);
         var previousSplitterConfig = coordinator.config();
         var previousCompatibility = coordinator.outputCompatibility();
+        int previousRetentionDays = config.unreferencedBlobRetentionDays();
         var nextSplitterConfig = reloaded.toSplitterConfig();
 
         coordinator.updateConfig(nextSplitterConfig);
@@ -159,15 +161,19 @@ public final class PolymerSplitter implements ModInitializer {
         boolean logPackSizesChanged =
                 previousSplitterConfig.logPackSizes() != nextSplitterConfig.logPackSizes();
         boolean enabledRestartRequired = reloaded.enabled() != runtimeEnabled;
+        boolean retentionPolicyChanged =
+                previousRetentionDays != reloaded.unreferencedBlobRetentionDays();
 
         LOGGER.log(System.Logger.Level.INFO,
                 "Reloaded PolymerSplitter config: outputChanged=" + outputSettingsChanged
                         + ", logPackSizesChanged=" + logPackSizesChanged
+                        + ", retentionPolicyChanged=" + retentionPolicyChanged
                         + ", enabledRestartRequired=" + enabledRestartRequired);
 
         return new ReloadResult(
                 outputSettingsChanged,
                 logPackSizesChanged,
+                retentionPolicyChanged,
                 enabledRestartRequired,
                 reloaded.enabled(),
                 runtimeEnabled
@@ -201,6 +207,7 @@ public final class PolymerSplitter implements ModInitializer {
     public record ReloadResult(
             boolean outputSettingsChanged,
             boolean logPackSizesChanged,
+            boolean retentionPolicyChanged,
             boolean enabledRestartRequired,
             boolean configuredEnabled,
             boolean effectiveEnabled

@@ -4,13 +4,16 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import org.karn.polymersplitter.common.io.AtomicFiles;
+import org.karn.polymersplitter.common.pack.ResourceNamespaces;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
+import java.util.TreeSet;
 
 public final class PolymerSplitterConfig {
     private static final Gson GSON = new GsonBuilder()
@@ -25,6 +28,9 @@ public final class PolymerSplitterConfig {
     private boolean logPackSizes = true;
     private int minSplitPackSizeMb = 30;
     private int compressionLevel = 6;
+    private List<String> includeNamespaces = List.of();
+    private List<String> excludeNamespaces = List.of();
+    private int unreferencedBlobRetentionDays = 0;
 
     public static PolymerSplitterConfig load(Path path) throws IOException {
         Objects.requireNonNull(path, "path");
@@ -56,6 +62,21 @@ public final class PolymerSplitterConfig {
         }
         if (!stored.has("compressionLevel")) {
             stored.addProperty("compressionLevel", config.compressionLevel);
+            migrated = true;
+        }
+        if (!stored.has("includeNamespaces")) {
+            stored.add("includeNamespaces", GSON.toJsonTree(config.includeNamespaces));
+            migrated = true;
+        }
+        if (!stored.has("excludeNamespaces")) {
+            stored.add("excludeNamespaces", GSON.toJsonTree(config.excludeNamespaces));
+            migrated = true;
+        }
+        if (!stored.has("unreferencedBlobRetentionDays")) {
+            stored.addProperty(
+                    "unreferencedBlobRetentionDays",
+                    config.unreferencedBlobRetentionDays
+            );
             migrated = true;
         }
         if (migrated) {
@@ -92,7 +113,9 @@ public final class PolymerSplitterConfig {
                 deterministicZip,
                 logPackSizes,
                 minSplitPackSizeMb,
-                compressionLevel
+                compressionLevel,
+                includeNamespaces,
+                excludeNamespaces
         );
     }
 
@@ -124,6 +147,18 @@ public final class PolymerSplitterConfig {
         return compressionLevel;
     }
 
+    public List<String> includeNamespaces() {
+        return includeNamespaces;
+    }
+
+    public List<String> excludeNamespaces() {
+        return excludeNamespaces;
+    }
+
+    public int unreferencedBlobRetentionDays() {
+        return unreferencedBlobRetentionDays;
+    }
+
     private void validate() {
         if (minSplitPackSizeMb < 0) {
             throw new IllegalArgumentException("minSplitPackSizeMb must be non-negative");
@@ -131,11 +166,41 @@ public final class PolymerSplitterConfig {
         if (compressionLevel < 0 || compressionLevel > 9) {
             throw new IllegalArgumentException("compressionLevel must be between 0 and 9");
         }
+        if (unreferencedBlobRetentionDays < -1) {
+            throw new IllegalArgumentException(
+                    "unreferencedBlobRetentionDays must be -1 or non-negative"
+            );
+        }
+
+        includeNamespaces = normalizeNamespaces(includeNamespaces, "includeNamespaces");
+        excludeNamespaces = normalizeNamespaces(excludeNamespaces, "excludeNamespaces");
+
         if (!"namespace".equals(splitMode)) {
             throw new IllegalArgumentException(
                     "Unsupported splitMode '" + splitMode + "'. Only 'namespace' is currently supported."
             );
         }
     }
+    private static List<String> normalizeNamespaces(
+            List<String> namespaces,
+            String field
+    ) {
+        if (namespaces == null) {
+            throw new IllegalArgumentException(field + " must not be null");
+        }
+
+        TreeSet<String> normalized = new TreeSet<>();
+        for (String namespace : namespaces) {
+            if (!ResourceNamespaces.isValid(namespace)) {
+                throw new IllegalArgumentException(
+                        "Invalid resource namespace in " + field + ": " + namespace
+                );
+            }
+            normalized.add(namespace);
+        }
+
+        return List.copyOf(normalized);
+    }
+
 
 }

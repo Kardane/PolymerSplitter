@@ -87,7 +87,12 @@ public final class PackSplitter {
                 boolean primary = namespace.equals(primaryNamespace);
                 if (primary) {
                     entries.sort(Comparator.comparing(ZipEntry::getName));
+                } else if (!config.shouldSplitIndependently(namespace)) {
+                    primaryEntries.addAll(entries);
+                    logPolicyMergedNamespace(namespace, primaryNamespace);
+                    continue;
                 }
+
                 String fingerprint = fingerprintNamespace(
                         zip,
                         sharedFingerprint,
@@ -171,6 +176,14 @@ public final class PackSplitter {
         } catch (IOException ignored) {
             return false;
         }
+    }
+
+    private static void logPolicyMergedNamespace(
+            String namespace,
+            String primaryNamespace
+    ) {
+        LOGGER.log(System.Logger.Level.INFO, "Merged namespace '" + namespace
+                + "' into primary pack '" + primaryNamespace + "' by namespace policy");
     }
 
     private static void logMergedNamespace(String namespace, String primaryNamespace, long size) {

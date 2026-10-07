@@ -71,7 +71,7 @@ The configuration file is created at `config/polymersplitter.json`.
 
 A missing file is created with the defaults below. Missing settings use defaults in memory; startup/reload adds newly introduced settings while preserving existing fields. An empty or whitespace-only file is invalid and prevents initialization.
 
-Use `/polymersplitter reload` to reload the file. Output-affecting settings become active for the next Polymer generation; run `/polymersplitter rebuild` after reload to apply them immediately. The current READY generation remains active until then. Changing `enabled` still requires a server restart because hook registration is a startup concern.
+Use `/polymersplitter reload` to reload the file. Output-affecting settings—including namespace policy—become active for the next Polymer generation; run `/polymersplitter rebuild` after reload to apply them immediately. Retention-policy changes apply at the next successful startup cache restore. The current READY generation remains active until then. Changing `enabled` still requires a server restart because hook registration is a startup concern.
 
 On POSIX filesystems, newly saved configuration and cache-index JSON files use mode `0644` so an administrator using a different SFTP account can read them. Existing files are rewritten on load only when adding the missing size option; older files saved with mode `0600` may otherwise require a one-time read-permission adjustment. These JSON files contain settings and cache metadata, not credentials.
 
@@ -83,13 +83,20 @@ On POSIX filesystems, newly saved configuration and cache-index JSON files use m
   "deterministicZip": true,
   "logPackSizes": true,
   "minSplitPackSizeMb": 30,
-  "compressionLevel": 6
+  "compressionLevel": 6,
+  "includeNamespaces": [],
+  "excludeNamespaces": [],
+  "unreferencedBlobRetentionDays": 0
 }
 ```
 
 Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon`, `deterministicZip`, `minSplitPackSizeMb`, or `compressionLevel` invalidates cache reuse rather than reusing ZIPs produced under different settings.
 
 `compressionLevel` accepts `0` through `9` and is passed to Java's ZIP deflater for newly generated namespace packs. The default is `6`.
+
+Namespace policy never discards resources. An empty `includeNamespaces` list means every namespace is eligible to remain independent. When it is non-empty, only listed non-primary namespaces are eligible for independent packs; all others are merged into the primary pack. `excludeNamespaces` always wins and forces matching non-primary namespaces into the primary pack. The primary namespace itself always remains the primary pack. Size-based merging is applied after this policy.
+
+`unreferencedBlobRetentionDays` controls safe startup garbage collection of old content-addressed blobs. `0` keeps the existing behavior and deletes unreferenced blobs at the next successful startup restore, a positive value retains them until they are at least that many days old, and `-1` disables automatic hosted-blob GC. Runtime rebuilds never delete historical blobs.
 
 `minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
 
