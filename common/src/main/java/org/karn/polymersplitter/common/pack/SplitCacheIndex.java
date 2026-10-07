@@ -1,11 +1,11 @@
 package org.karn.polymersplitter.common.pack;
 
+import org.karn.polymersplitter.common.io.AtomicFiles;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -18,9 +18,6 @@ import java.util.regex.Pattern;
 public final class SplitCacheIndex {
     private static final String FILE_NAME = "current-cache.tsv";
     private static final Pattern GENERATION_DIRECTORY = Pattern.compile("generation-[0-9a-f]{40}");
-    private static final Pattern SHA1_PATTERN = Pattern.compile("[0-9a-f]{40}");
-    private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
-    private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_.-]+");
 
     private SplitCacheIndex() {
     }
@@ -61,7 +58,7 @@ public final class SplitCacheIndex {
                 if (sourceSeen) {
                     throw new IOException("Split cache index contains duplicate source metadata");
                 }
-                if (!SHA1_PATTERN.matcher(parts[1]).matches()) {
+                if (!Hashes.isSha1(parts[1])) {
                     throw new IOException("Invalid split cache source SHA-1: " + parts[1]);
                 }
 
@@ -194,7 +191,7 @@ public final class SplitCacheIndex {
 
         try {
             Files.writeString(temp, content.toString(), StandardCharsets.UTF_8);
-            atomicReplace(temp, target);
+            AtomicFiles.replace(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -225,7 +222,7 @@ public final class SplitCacheIndex {
                     continue;
                 }
 
-                deleteRecursively(entry);
+                AtomicFiles.deleteRecursively(entry);
             }
         }
     }
@@ -239,13 +236,13 @@ public final class SplitCacheIndex {
         String relativePath = parts[6];
         String fileName = parts[7];
 
-        if (!NAMESPACE_PATTERN.matcher(namespace).matches()) {
+        if (!ResourceNamespaces.isValid(namespace)) {
             throw new IOException("Invalid cached namespace: " + namespace);
         }
-        if (!SHA256_PATTERN.matcher(fingerprint).matches()) {
+        if (!Hashes.isSha256(fingerprint)) {
             throw new IOException("Invalid cached fingerprint for namespace " + namespace);
         }
-        if (!SHA1_PATTERN.matcher(sha1).matches()) {
+        if (!Hashes.isSha1(sha1)) {
             throw new IOException("Invalid cached SHA-1 for namespace " + namespace);
         }
         if (!(namespace + ".zip").equals(fileName)) {
@@ -323,7 +320,7 @@ public final class SplitCacheIndex {
             return false;
         }
 
-        return PackHashUtil.sha1(path).equals(sha1);
+        return Hashes.sha1(path).equals(sha1);
     }
 
     private static Path resolveSafe(Path root, String relativeText) throws IOException {
@@ -345,24 +342,6 @@ public final class SplitCacheIndex {
         }
 
         return resolved;
-    }
-
-    private static void deleteRecursively(Path directory) throws IOException {
-        try (var paths = Files.walk(directory)) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
-    }
-
-    private static void atomicReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     private record RawPack(

@@ -37,7 +37,6 @@ public final class PolymerAutoHostBridge {
             return new HostingStatus(
                     HostingStatus.Kind.UNKNOWN,
                     "<uninitialized>",
-                    false,
                     "Polymer AutoHost configuration is not initialized"
             );
         }
@@ -50,7 +49,6 @@ public final class PolymerAutoHostBridge {
             return new HostingStatus(
                     HostingStatus.Kind.DISABLED,
                     providerType,
-                    false,
                     "Polymer AutoHost is disabled"
             );
         }
@@ -64,25 +62,21 @@ public final class PolymerAutoHostBridge {
                  "polymer:standalone" -> new HostingStatus(
                     HostingStatus.Kind.LOCAL,
                     providerType,
-                    true,
                     "Polymer AutoHost can serve registered split files"
             );
             case "polymer:external" -> new HostingStatus(
                     HostingStatus.Kind.EXTERNAL,
                     providerType,
-                    false,
                     "Polymer AutoHost external provider only constructs URLs; PolymerSplitter does not upload split ZIPs"
             );
             case "polymer:empty" -> new HostingStatus(
                     HostingStatus.Kind.EMPTY,
                     providerType,
-                    false,
                     "Polymer AutoHost empty provider does not host resource packs"
             );
             default -> new HostingStatus(
                     HostingStatus.Kind.UNKNOWN,
                     providerType,
-                    false,
                     "AutoHost provider is not explicitly supported by PolymerSplitter"
             );
         };
@@ -215,14 +209,6 @@ public final class PolymerAutoHostBridge {
         AutoHost.FILES.keySet().removeIf(
                 path -> path.startsWith(HOST_NAMESPACE + "/" + HOST_PREFIX)
         );
-    }
-
-    public static String fileUrl(
-            ResourcePackDataProvider provider,
-            PacketContext context,
-            SplitPack pack
-    ) {
-        return provider.getFilePath(context, identifier(pack), pack.sha1());
     }
 
     private static UUID effectiveUuid(SplitPack pack, String primaryNamespace) {

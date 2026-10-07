@@ -1,5 +1,6 @@
 package org.karn.polymersplitter.common.lifecycle;
 
+import org.karn.polymersplitter.common.pack.Hashes;
 import org.karn.polymersplitter.common.pack.SplitPack;
 
 import java.util.ArrayList;
@@ -8,21 +9,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 public record SplitGeneration(
         String sourceHash,
         List<SplitPack> packs,
         Map<String, SplitPack> byNamespace
 ) {
-    private static final Pattern SHA1_PATTERN = Pattern.compile("[0-9a-f]{40}");
-
     public SplitGeneration {
         Objects.requireNonNull(sourceHash, "sourceHash");
         Objects.requireNonNull(packs, "packs");
         Objects.requireNonNull(byNamespace, "byNamespace");
 
-        if (!SHA1_PATTERN.matcher(sourceHash).matches()) {
+        if (!Hashes.isSha1(sourceHash)) {
             throw new IllegalArgumentException("Invalid generation source SHA-1: " + sourceHash);
         }
         if (packs.isEmpty()) {

@@ -1,5 +1,6 @@
 package org.karn.polymersplitter.polymer;
 
+import org.karn.polymersplitter.util.Format;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
 import eu.pb4.polymer.resourcepack.impl.PolymerResourcePackMod;
 import net.minecraft.commands.CommandSourceStack;
@@ -75,7 +76,7 @@ public final class PolymerGenerationHook {
 
         LOGGER.log(System.Logger.Level.INFO,
                 "Published split generation: packs=" + packs.size()
-                        + ", total=" + formatBytes(totalSize)
+                        + ", total=" + Format.formatBytes(totalSize)
                         + ", sourceSha1=" + coordinator.sourceHash()
                         + ", added=" + transition.added().size()
                         + ", removed=" + transition.removed().size()
@@ -96,25 +97,10 @@ public final class PolymerGenerationHook {
                 .forEach(pack -> LOGGER.log(
                         System.Logger.Level.INFO,
                         "Pack " + pack.namespace()
-                                + ": " + formatBytes(pack.size())
+                                + ": " + Format.formatBytes(pack.size())
                                 + ", sha1=" + pack.sha1()
                 ));
     }
 
-    private static String formatBytes(long bytes) {
-        if (bytes < 1024) {
-            return bytes + " B";
-        }
 
-        double value = bytes;
-        String[] units = {"KiB", "MiB", "GiB"};
-        int unit = -1;
-
-        do {
-            value /= 1024.0;
-            unit++;
-        } while (value >= 1024.0 && unit + 1 < units.length);
-
-        return String.format("%.1f %s", value, units[unit]);
-    }
 }

@@ -1,6 +1,6 @@
 package org.karn.polymersplitter.common.lifecycle;
 
-import org.karn.polymersplitter.common.pack.PackHashUtil;
+import org.karn.polymersplitter.common.pack.Hashes;
 import org.karn.polymersplitter.common.pack.PackSplitter;
 import org.karn.polymersplitter.common.pack.SplitCacheIndex;
 import org.karn.polymersplitter.common.pack.SplitPack;
@@ -19,29 +19,18 @@ public final class SplitCoordinator {
     private final Path outputRoot;
     private final SplitterConfig config;
     private final SplitRegistry registry;
-    private final PackSplitter splitter;
+    private final PackSplitter splitter = new PackSplitter();
 
     private final AtomicReference<SplitState> state = new AtomicReference<>(SplitState.NOT_STARTED);
-    private final AtomicReference<Path> sourcePack = new AtomicReference<>();
     private final AtomicReference<String> sourceHash = new AtomicReference<>();
     private final AtomicReference<String> lastFailure = new AtomicReference<>();
     private final AtomicReference<NamespaceTransition> lastTransition =
             new AtomicReference<>(NamespaceTransition.empty());
 
     public SplitCoordinator(Path outputRoot, SplitterConfig config, SplitRegistry registry) {
-        this(outputRoot, config, registry, new PackSplitter());
-    }
-
-    SplitCoordinator(
-            Path outputRoot,
-            SplitterConfig config,
-            SplitRegistry registry,
-            PackSplitter splitter
-    ) {
         this.outputRoot = Objects.requireNonNull(outputRoot, "outputRoot").toAbsolutePath().normalize();
         this.config = Objects.requireNonNull(config, "config");
         this.registry = Objects.requireNonNull(registry, "registry");
-        this.splitter = Objects.requireNonNull(splitter, "splitter");
     }
 
     public void markGenerating() {
@@ -69,7 +58,6 @@ public final class SplitCoordinator {
             beforePublish.accept(generation.packs());
 
             NamespaceTransition transition = registry.replace(generation);
-            sourcePack.set(null);
             sourceHash.set(generation.sourceHash());
             lastFailure.set(null);
             lastTransition.set(transition);
@@ -80,11 +68,6 @@ public final class SplitCoordinator {
             markFailed(e);
             throw e;
         }
-    }
-
-    public synchronized List<SplitPack> process(Path generatedPack) throws IOException {
-        return process(generatedPack, packs -> {
-        });
     }
 
     public synchronized List<SplitPack> process(
@@ -102,7 +85,7 @@ public final class SplitCoordinator {
                 throw new IOException("Generated Polymer resource pack does not exist: " + normalizedSource);
             }
 
-            String hash = PackHashUtil.sha1(normalizedSource);
+            String hash = Hashes.sha1(normalizedSource);
             Path generationDirectory = outputRoot.resolve("generation-" + hash);
 
             Optional<SplitCacheIndex.Snapshot> previousCache = readCacheBestEffort();
@@ -133,7 +116,6 @@ public final class SplitCoordinator {
             SplitCacheIndex.write(outputRoot, hash, generation.packs());
 
             NamespaceTransition transition = registry.replace(generation);
-            sourcePack.set(normalizedSource);
             sourceHash.set(hash);
             lastFailure.set(null);
             lastTransition.set(transition);
@@ -153,7 +135,6 @@ public final class SplitCoordinator {
 
     public synchronized void resetForServerStop() {
         NamespaceTransition transition = registry.clear();
-        sourcePack.set(null);
         sourceHash.set(null);
         lastFailure.set(null);
         lastTransition.set(transition);
@@ -196,10 +177,6 @@ public final class SplitCoordinator {
 
     public Path outputRoot() {
         return outputRoot;
-    }
-
-    public Path sourcePack() {
-        return sourcePack.get();
     }
 
     public String sourceHash() {

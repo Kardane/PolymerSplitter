@@ -1,11 +1,11 @@
 package org.karn.polymersplitter.common.pack;
 
+import org.karn.polymersplitter.common.io.AtomicFiles;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
 
@@ -23,7 +23,7 @@ public final class SplitPackManifest {
 
         try {
             Files.writeString(temp, toJson(packs), StandardCharsets.UTF_8);
-            atomicReplace(temp, target);
+            AtomicFiles.replace(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -87,13 +87,4 @@ public final class SplitPackManifest {
         return out.toString();
     }
 
-    private static void atomicReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
 }

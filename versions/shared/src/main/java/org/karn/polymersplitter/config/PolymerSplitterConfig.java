@@ -2,14 +2,13 @@ package org.karn.polymersplitter.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.karn.polymersplitter.common.io.AtomicFiles;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 
 public final class PolymerSplitterConfig {
@@ -58,7 +57,7 @@ public final class PolymerSplitterConfig {
 
         try {
             Files.writeString(temp, GSON.toJson(this) + System.lineSeparator(), StandardCharsets.UTF_8);
-            atomicReplace(temp, path);
+            AtomicFiles.replace(temp, path);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -66,7 +65,6 @@ public final class PolymerSplitterConfig {
 
     public SplitterConfig toSplitterConfig() {
         return new SplitterConfig(
-                enabled,
                 copyPackIcon,
                 deterministicZip,
                 logPackSizes
@@ -93,16 +91,4 @@ public final class PolymerSplitterConfig {
         }
     }
 
-    private static void atomicReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(
-                    source,
-                    target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING
-            );
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
 }

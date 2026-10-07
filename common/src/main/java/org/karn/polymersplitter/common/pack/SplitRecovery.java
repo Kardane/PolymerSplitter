@@ -1,9 +1,10 @@
 package org.karn.polymersplitter.common.pack;
 
+import org.karn.polymersplitter.common.io.AtomicFiles;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.regex.Pattern;
 
 public final class SplitRecovery {
@@ -67,7 +68,7 @@ public final class SplitRecovery {
                     continue;
                 }
 
-                deleteRecursively(entry);
+                AtomicFiles.deleteRecursively(entry);
                 deleted++;
             }
         }
@@ -85,11 +86,4 @@ public final class SplitRecovery {
                 || HOSTED_TEMP.matcher(name).matches();
     }
 
-    private static void deleteRecursively(Path directory) throws IOException {
-        try (var paths = Files.walk(directory)) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
-        }
-    }
 }

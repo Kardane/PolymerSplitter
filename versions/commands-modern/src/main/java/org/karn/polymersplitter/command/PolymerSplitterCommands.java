@@ -1,5 +1,6 @@
 package org.karn.polymersplitter.command;
 
+import org.karn.polymersplitter.util.Format;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
@@ -56,7 +57,7 @@ public final class PolymerSplitterCommands {
                 "PolymerSplitter: " + coordinator.state()
                         + " | enabled=" + PolymerSplitter.isEnabled()
                         + " | packs=" + packs.size()
-                        + " | total=" + formatBytes(totalSize(packs))
+                        + " | total=" + Format.formatBytes(totalSize(packs))
         ), false);
 
         var hosting = PolymerAutoHostBridge.currentHostingStatus();
@@ -108,7 +109,7 @@ public final class PolymerSplitterCommands {
         for (SplitPack pack : packs) {
             source.sendSuccess(() -> Component.literal(
                     pack.namespace()
-                            + " | " + formatBytes(pack.size())
+                            + " | " + Format.formatBytes(pack.size())
                             + " | sha1=" + abbreviate(pack.sha1())
                             + " | uuid=" + pack.uuid()
             ), false);
@@ -202,22 +203,7 @@ public final class PolymerSplitterCommands {
         return total;
     }
 
-    private static String formatBytes(long bytes) {
-        if (bytes < 1024) {
-            return bytes + " B";
-        }
 
-        double value = bytes;
-        String[] units = {"KiB", "MiB", "GiB"};
-        int unit = -1;
-
-        do {
-            value /= 1024.0;
-            unit++;
-        } while (value >= 1024.0 && unit + 1 < units.length);
-
-        return String.format("%.1f %s", value, units[unit]);
-    }
 
     private static String abbreviate(String hash) {
         return hash.length() <= 12 ? hash : hash.substring(0, 12);

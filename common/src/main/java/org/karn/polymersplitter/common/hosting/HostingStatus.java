@@ -5,13 +5,16 @@ import java.util.Objects;
 public record HostingStatus(
         Kind kind,
         String providerType,
-        boolean supported,
         String message
 ) {
     public HostingStatus {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(providerType, "providerType");
         Objects.requireNonNull(message, "message");
+    }
+
+    public boolean supported() {
+        return kind == Kind.LOCAL;
     }
 
     public enum Kind {

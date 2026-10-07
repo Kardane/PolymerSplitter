@@ -1,15 +1,14 @@
 package org.karn.polymersplitter.common.pack;
 
+import org.karn.polymersplitter.common.io.AtomicFiles;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -20,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
@@ -30,18 +28,9 @@ public final class PackSplitter {
     private static final String PACK_META = "pack.mcmeta";
     private static final String PACK_ICON = "pack.png";
     private static final String MCASSETS_ROOT = "assets/.mcassetsroot";
-    private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_.-]+");
     private static final LocalDateTime DETERMINISTIC_TIME = LocalDateTime.of(1980, 1, 1, 0, 0);
     private static final byte[] FINGERPRINT_SCHEMA =
             "polymersplitter:namespace-fingerprint:v2".getBytes(StandardCharsets.UTF_8);
-
-    public List<SplitPack> split(
-            Path sourcePack,
-            Path outputDirectory,
-            SplitterConfig config
-    ) throws IOException {
-        return split(sourcePack, outputDirectory, config, List.of());
-    }
 
     public List<SplitPack> split(
             Path sourcePack,
@@ -93,7 +82,7 @@ public final class PackSplitter {
 
                 SplitPack reusable = reusableByNamespace.get(namespace);
                 if (canReuse(reusable, fingerprint)) {
-                    materializeReuse(reusable.path(), target);
+                    AtomicFiles.linkOrCopy(reusable.path(), target);
 
                     packs.add(new SplitPack(
                             namespace,
@@ -120,7 +109,7 @@ public final class PackSplitter {
                         namespace,
                         target,
                         fingerprint,
-                        PackHashUtil.sha1(target),
+                        Hashes.sha1(target),
                         PackIdUtil.uuidForNamespace(namespace),
                         Files.size(target)
                 ));
@@ -141,37 +130,6 @@ public final class PackSplitter {
             return Files.size(pack.path()) == pack.size();
         } catch (IOException ignored) {
             return false;
-        }
-    }
-
-    private static void materializeReuse(Path source, Path target) throws IOException {
-        Path normalizedSource = source.toAbsolutePath().normalize();
-        Path normalizedTarget = target.toAbsolutePath().normalize();
-
-        if (normalizedSource.equals(normalizedTarget)) {
-            return;
-        }
-
-        Files.createDirectories(normalizedTarget.getParent());
-
-        Path temp = Files.createTempFile(
-                normalizedTarget.getParent(),
-                "." + normalizedTarget.getFileName(),
-                ".reuse"
-        );
-
-        try {
-            Files.deleteIfExists(temp);
-
-            try {
-                Files.createLink(temp, normalizedSource);
-            } catch (IOException | UnsupportedOperationException | SecurityException ignored) {
-                Files.copy(normalizedSource, temp, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            atomicReplace(temp, normalizedTarget);
-        } finally {
-            Files.deleteIfExists(temp);
         }
     }
 
@@ -268,7 +226,7 @@ public final class PackSplitter {
             ZipEntry packIcon,
             List<ZipEntry> sharedRootEntries
     ) throws IOException {
-        MessageDigest digest = sha256Digest();
+        MessageDigest digest = Hashes.sha256();
         digest.update(FINGERPRINT_SCHEMA);
         digest.update((byte) 0);
 
@@ -290,14 +248,14 @@ public final class PackSplitter {
             byte[] sharedFingerprint,
             List<ZipEntry> entries
     ) throws IOException {
-        MessageDigest digest = sha256Digest();
+        MessageDigest digest = Hashes.sha256();
         digest.update(sharedFingerprint);
 
         for (ZipEntry entry : entries) {
             updateDigest(zip, entry, validateEntryName(entry.getName()), digest);
         }
 
-        return toHex(digest.digest());
+        return Hashes.hex(digest.digest());
     }
 
     private static void updateDigest(
@@ -318,27 +276,6 @@ public final class PackSplitter {
         }
 
         digest.update((byte) 0);
-    }
-
-    private static MessageDigest sha256Digest() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available", e);
-        }
-    }
-
-    private static String toHex(byte[] bytes) {
-        char[] out = new char[bytes.length * 2];
-        char[] hex = "0123456789abcdef".toCharArray();
-
-        for (int i = 0; i < bytes.length; i++) {
-            int value = bytes[i] & 0xff;
-            out[i * 2] = hex[value >>> 4];
-            out[i * 2 + 1] = hex[value & 0x0f];
-        }
-
-        return new String(out);
     }
 
     private static void writeNamespacePack(
@@ -386,7 +323,7 @@ public final class PackSplitter {
                 }
             }
 
-            atomicReplace(temp, target);
+            AtomicFiles.replace(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -433,18 +370,8 @@ public final class PackSplitter {
     }
 
     private static void validateNamespace(String namespace) throws IOException {
-        if (!NAMESPACE_PATTERN.matcher(namespace).matches()) {
+        if (!ResourceNamespaces.isValid(namespace)) {
             throw new IOException("Invalid resource namespace: " + namespace);
-        }
-    }
-
-    private static void atomicReplace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
