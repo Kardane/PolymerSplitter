@@ -23,7 +23,8 @@ import java.util.UUID;
 
 public final class SplitCacheIndex {
     public static final String FILE_NAME = "index.json";
-    private static final int FORMAT = 2;
+    private static final int LEGACY_FORMAT_WITHOUT_OUTPUT_COMPATIBILITY = 2;
+    private static final int FORMAT = 3;
     private static final Gson GSON = new GsonBuilder()
             .setPrettyPrinting()
             .disableHtmlEscaping()
@@ -32,7 +33,12 @@ public final class SplitCacheIndex {
     private SplitCacheIndex() {
     }
 
-    public static Optional<Snapshot> read(Path outputRoot) throws IOException {
+    public static Optional<ReadResult> read(
+            Path outputRoot,
+            OutputCompatibility expectedCompatibility
+    ) throws IOException {
+        Objects.requireNonNull(expectedCompatibility, "expectedCompatibility");
+
         Path root = outputRoot.toAbsolutePath().normalize();
         Path index = root.resolve(FILE_NAME);
 
@@ -54,7 +60,8 @@ public final class SplitCacheIndex {
         }
 
         int format = requireInt(object, "format");
-        if (format != FORMAT) {
+        if (format != LEGACY_FORMAT_WITHOUT_OUTPUT_COMPATIBILITY
+                && format != FORMAT) {
             throw new IOException("Unsupported split cache format: " + format);
         }
 
@@ -62,6 +69,10 @@ public final class SplitCacheIndex {
         if (!Hashes.isSha1(sourceHash)) {
             throw new IOException("Invalid split cache source SHA-1: " + sourceHash);
         }
+
+        OutputCompatibility storedCompatibility = format == FORMAT
+                ? readOutputCompatibility(object)
+                : null;
 
         JsonElement packsElement = object.get("packs");
         if (packsElement == null || !packsElement.isJsonArray()) {
@@ -125,7 +136,20 @@ public final class SplitCacheIndex {
             ));
         }
 
-        return Optional.of(new Snapshot(sourceHash, List.copyOf(packs)));
+        CacheCompatibility compatibility =
+                storedCompatibility != null
+                        && storedCompatibility.equals(expectedCompatibility)
+                        ? CacheCompatibility.COMPATIBLE
+                        : CacheCompatibility.INCOMPATIBLE;
+
+        return Optional.of(new ReadResult(
+                new Snapshot(
+                        sourceHash,
+                        List.copyOf(packs),
+                        storedCompatibility
+                ),
+                compatibility
+        ));
     }
 
     public static Snapshot verify(
@@ -158,10 +182,12 @@ public final class SplitCacheIndex {
     public static void write(
             Path outputRoot,
             String sourceHash,
-            List<SplitPack> packs
+            List<SplitPack> packs,
+            OutputCompatibility outputCompatibility
     ) throws IOException {
         Path root = outputRoot.toAbsolutePath().normalize();
         Files.createDirectories(root);
+        Objects.requireNonNull(outputCompatibility, "outputCompatibility");
 
         if (!Hashes.isSha1(sourceHash)) {
             throw new IOException("Invalid split cache source SHA-1: " + sourceHash);
@@ -173,6 +199,21 @@ public final class SplitCacheIndex {
         JsonObject rootObject = new JsonObject();
         rootObject.addProperty("format", FORMAT);
         rootObject.addProperty("sourceSha1", sourceHash);
+
+        JsonObject outputObject = new JsonObject();
+        outputObject.addProperty(
+                "algorithmVersion",
+                outputCompatibility.algorithmVersion()
+        );
+        outputObject.addProperty(
+                "copyPackIcon",
+                outputCompatibility.copyPackIcon()
+        );
+        outputObject.addProperty(
+                "deterministicZip",
+                outputCompatibility.deterministicZip()
+        );
+        rootObject.add("output", outputObject);
 
         JsonArray array = new JsonArray();
         Set<String> namespaces = new HashSet<>();
@@ -223,6 +264,30 @@ public final class SplitCacheIndex {
         );
     }
 
+    private static OutputCompatibility readOutputCompatibility(
+            JsonObject object
+    ) throws IOException {
+        JsonElement outputElement = object.get("output");
+        if (outputElement == null || !outputElement.isJsonObject()) {
+            throw new IOException("Split cache index is missing output compatibility metadata");
+        }
+
+        JsonObject output = outputElement.getAsJsonObject();
+        int algorithmVersion = requireInt(output, "algorithmVersion");
+        boolean copyPackIcon = requireBoolean(output, "copyPackIcon");
+        boolean deterministicZip = requireBoolean(output, "deterministicZip");
+
+        try {
+            return new OutputCompatibility(
+                    algorithmVersion,
+                    copyPackIcon,
+                    deterministicZip
+            );
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid output compatibility metadata", e);
+        }
+    }
+
     private static String requireString(JsonObject object, String name) throws IOException {
         JsonElement element = object.get(name);
         if (element == null || !element.isJsonPrimitive()
@@ -230,6 +295,15 @@ public final class SplitCacheIndex {
             throw new IOException("Split cache index field '" + name + "' must be a string");
         }
         return element.getAsString();
+    }
+
+    private static boolean requireBoolean(JsonObject object, String name) throws IOException {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonPrimitive()
+                || !element.getAsJsonPrimitive().isBoolean()) {
+            throw new IOException("Split cache index field '" + name + "' must be a boolean");
+        }
+        return element.getAsBoolean();
     }
 
     private static int requireInt(JsonObject object, String name) throws IOException {
@@ -254,7 +328,30 @@ public final class SplitCacheIndex {
         }
     }
 
-    public record Snapshot(String sourceHash, List<SplitPack> packs) {
+    public enum CacheCompatibility {
+        COMPATIBLE,
+        INCOMPATIBLE
+    }
+
+    public record ReadResult(
+            Snapshot snapshot,
+            CacheCompatibility compatibility
+    ) {
+        public ReadResult {
+            Objects.requireNonNull(snapshot, "snapshot");
+            Objects.requireNonNull(compatibility, "compatibility");
+        }
+
+        public boolean isCompatible() {
+            return compatibility == CacheCompatibility.COMPATIBLE;
+        }
+    }
+
+    public record Snapshot(
+            String sourceHash,
+            List<SplitPack> packs,
+            OutputCompatibility outputCompatibility
+    ) {
         public Snapshot {
             Objects.requireNonNull(sourceHash, "sourceHash");
             packs = List.copyOf(packs);

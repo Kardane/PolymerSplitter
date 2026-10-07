@@ -17,7 +17,7 @@ public final class LegacyCacheMigration {
     private LegacyCacheMigration() {
     }
 
-    public static boolean migrateIfNeeded(Path outputRoot) throws IOException {
+    public static boolean importBlobsIfNeeded(Path outputRoot) throws IOException {
         Path root = outputRoot.toAbsolutePath().normalize();
 
         if (SplitCacheIndex.exists(root)) {
@@ -30,7 +30,6 @@ public final class LegacyCacheMigration {
         }
 
         LegacySnapshot legacy = readLegacy(root, legacyIndex);
-        List<SplitPack> migrated = new ArrayList<>(legacy.packs().size());
 
         for (LegacyPack pack : legacy.packs()) {
             Optional<Path> existing = HostedPackStore.findValidBlob(
@@ -39,26 +38,18 @@ public final class LegacyCacheMigration {
                     pack.size()
             );
 
-            Path hosted = existing.isPresent()
-                    ? existing.get()
-                    : HostedPackStore.importLegacyBlob(
-                            root,
-                            pack.generationPath(),
-                            pack.sha1(),
-                            pack.size()
-                    );
-
-            migrated.add(new SplitPack(
-                    pack.namespace(),
-                    hosted,
-                    pack.fingerprint(),
-                    pack.sha1(),
-                    pack.uuid(),
-                    pack.size()
-            ));
+            if (existing.isEmpty()) {
+                HostedPackStore.importLegacyBlob(
+                        root,
+                        pack.generationPath(),
+                        pack.sha1(),
+                        pack.size()
+                );
+            }
         }
 
-        SplitCacheIndex.write(root, legacy.sourceHash(), migrated);
+        // Legacy metadata has no output-compatibility key. Importing its immutable
+        // blobs is safe, but it must not be relabeled as a current compatible index.
         return true;
     }
 

@@ -168,7 +168,7 @@ GENERATING
     +--> failure --> FAILED
 ```
 
-At server start, after Polymer AutoHost has loaded its actual configuration/provider, PolymerSplitter classifies the provider. Startup cache restore runs only for explicitly supported local providers. It then removes owned temporary files, validates `current-cache.tsv`, verifies every cached split ZIP, rebuilds/validates immutable hosted blobs, registers their content-addressed AutoHost IDs, and only then publishes the recovered registry as `READY`. If cache recovery fails, the registry remains unpublished and Polymer's main pack remains the fallback.
+At server start, after Polymer AutoHost has loaded its actual configuration/provider, PolymerSplitter classifies the provider. Startup cache restore runs only for explicitly supported local providers. It removes owned temporary files, reads `index.json`, requires an exact output-compatibility match, verifies every referenced immutable hosted blob, registers content-addressed AutoHost IDs, and only then publishes the recovered snapshot as `READY`. Missing or output-incompatible cache metadata is a cache miss and does not become active. Integrity failure in a compatible cache prevents cached publication and leaves Polymer's main pack as the fallback.
 
 A newly generated resource-pack generation is published in this order:
 
@@ -295,7 +295,17 @@ config/polymersplitter/generated/
 
 `hosted/<sha1>.zip` is the single persistent copy of every split ZIP. `SplitPack.path()` always points to this content-addressed location.
 
-`index.json` format 2 is the durable pointer to the current generation. It stores the source pack SHA-1 and, for each namespace, its fingerprint, final ZIP SHA-1, deterministic UUID, and size. Paths are not stored; they are derived from the SHA-1.
+`index.json` format 3 is the durable pointer to the current generation. It stores the source pack SHA-1, explicit output-compatibility metadata, and for each namespace its fingerprint, final ZIP SHA-1, deterministic UUID, and size. Paths are not stored; they are derived from the SHA-1.
+
+Output compatibility is intentionally separate from the JSON schema version:
+
+```text
+algorithmVersion
+copyPackIcon
+deterministicZip
+```
+
+`logPackSizes` is diagnostic only and does not affect output compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
 
 ### Namespace fingerprint
 
@@ -313,37 +323,34 @@ A shared metadata change therefore invalidates all namespace fingerprints.
 
 For each namespace:
 
-1. Compute its fingerprint.
-2. If the previous verified index has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
-3. Otherwise write one temporary ZIP inside `hosted/`.
-4. Compute the final ZIP SHA-1 once.
-5. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
-6. Register the content-addressed hosted ID.
-7. After all namespaces are ready, atomically replace `index.json`.
+1. Read the previous index only if its output-compatibility key exactly matches the current splitter configuration/algorithm.
+2. Verify every referenced blob before it becomes a reuse candidate.
+3. Compute the namespace fingerprint.
+4. If the compatible verified cache has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
+5. Otherwise write one temporary ZIP inside `hosted/`.
+6. Compute the final ZIP SHA-1.
+7. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
+8. Register the content-addressed hosted ID.
+9. After all namespaces are ready, atomically replace `index.json` with the current compatibility key.
 
 A failed publication can leave an unreferenced immutable blob, but cannot remap an issued URL or advance the current index.
 
 ### Startup read and verification
 
-Normal format-2 startup is deliberately read-only until publication:
+Normal format-3 startup is deliberately read-only until publication:
 
-1. `SplitCacheIndex.read(...)` parses and validates `index.json` metadata without mutating files.
-2. `SplitCacheIndex.verify(...)` verifies every referenced hosted blob's size and SHA-1.
-3. Only after the entire index verifies are the blobs registered with AutoHost and the coordinator snapshot restored.
+1. `SplitCacheIndex.read(...)` parses and validates `index.json` metadata without mutating files and compares its output-compatibility key with the current key.
+2. An incompatible cache is treated as a reuse/restore miss; its hosted blobs are preserved and are not relabeled as current output.
+3. Only a compatible cache reaches `SplitCacheIndex.verify(...)`, which verifies every referenced hosted blob's size and SHA-1.
+4. Only after the entire compatible index verifies are the blobs registered with AutoHost and the coordinator snapshot restored.
 
 There is no normal cache-repair phase because the content-addressed blob is the canonical file. A missing/corrupted referenced blob invalidates the cached generation and falls back to Polymer's normal main pack.
 
 ### One-time legacy migration
 
-If `index.json` is absent but legacy `current-cache.tsv` exists, `LegacyCacheMigration`:
+If format-3 `index.json` is absent but legacy `current-cache.tsv` exists, `LegacyCacheMigration` may validate and promote legacy generation ZIPs into immutable `hosted/<sha1>.zip` blobs. Legacy metadata has no output-compatibility key, so it is never rewritten as a current compatible index and cannot restore or reuse a generation by itself.
 
-1. parses and validates the legacy metadata,
-2. accepts an already-valid `hosted/<sha1>.zip` when present,
-3. otherwise validates the referenced `generation-<source-sha1>/<namespace>.zip` and promotes it into `hosted/<sha1>.zip`,
-4. atomically writes format-2 `index.json`,
-5. only then allows legacy TSV/generation directories to be removed.
-
-An invalid legacy cache is never partially migrated. New generation can still proceed without cache reuse.
+Likewise, the previous format-2 `index.json` is readable for explicit incompatibility classification but lacks output compatibility and is therefore a cache miss. Hosted blobs are preserved. A current format-3 index is written only after a successful normal generation under the current output compatibility.
 
 ### Retention and garbage collection
 
@@ -540,7 +547,8 @@ Public `PolymerResourcePackUtils.buildMain(...)` was not substituted for `genera
 The desired failure mode is degradation to normal Polymer behavior, not partial split delivery.
 
 - Invalid/missing Polymer output: split generation fails.
-- Missing/malformed format-2 index metadata: cached publication is skipped.
+- Missing cache metadata or output-incompatible format-2/format-3 metadata: cached publication/reuse is skipped as a cache miss.
+- Malformed current index metadata: cached publication is skipped.
 - Any cached namespace with an invalid UUID, size, fingerprint, SHA-1, or missing/corrupted hosted blob invalidates the entire startup restore.
 - Interrupted temporary files are cleaned on startup on a best-effort basis.
 - Invalid legacy TSV/generation data is not partially migrated.
@@ -551,7 +559,8 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - AutoHost registration failure: whole new registry is not published.
 - Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
 - `index.json` write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
-- Startup index read/verification or legacy migration failure: cached publication is skipped and Polymer's main pack remains the fallback.
+- Compatible-cache integrity verification failure: cached publication is skipped and Polymer's main pack remains the fallback.
+- Legacy metadata/blob import failure is a cache miss; current generation can still proceed without reuse.
 - Legacy-artifact or unreferenced-blob cleanup failure: ignored for delivery purposes.
 - Polymer reports output issues on modern versions: split generation is marked failed.
 

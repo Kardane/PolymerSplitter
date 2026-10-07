@@ -2,6 +2,7 @@ package org.karn.polymersplitter.common.lifecycle;
 
 import org.karn.polymersplitter.common.pack.Hashes;
 import org.karn.polymersplitter.common.pack.LegacyCacheMigration;
+import org.karn.polymersplitter.common.pack.OutputCompatibility;
 import org.karn.polymersplitter.common.pack.PackSplitter;
 import org.karn.polymersplitter.common.pack.SplitCacheIndex;
 import org.karn.polymersplitter.common.pack.SplitPack;
@@ -20,6 +21,7 @@ import java.util.function.Consumer;
 public final class SplitCoordinator {
     private final Path outputRoot;
     private final SplitterConfig config;
+    private final OutputCompatibility outputCompatibility;
     private final PackSplitter splitter = new PackSplitter();
     private final AtomicReference<CoordinatorSnapshot> snapshot =
             new AtomicReference<>(CoordinatorSnapshot.initial());
@@ -28,6 +30,7 @@ public final class SplitCoordinator {
     public SplitCoordinator(Path outputRoot, SplitterConfig config) {
         this.outputRoot = Objects.requireNonNull(outputRoot, "outputRoot").toAbsolutePath().normalize();
         this.config = Objects.requireNonNull(config, "config");
+        this.outputCompatibility = OutputCompatibility.current(config);
     }
 
     public void markGenerating() {
@@ -45,16 +48,15 @@ public final class SplitCoordinator {
         Objects.requireNonNull(beforePublish, "beforePublish");
 
         try {
-            LegacyCacheMigration.migrateIfNeeded(outputRoot);
+            importLegacyBlobsBestEffort();
 
-            Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
+            Optional<SplitCacheIndex.Snapshot> cached =
+                    loadCompatibleVerifiedCache();
             if (cached.isEmpty()) {
                 return Optional.empty();
             }
 
-            SplitCacheIndex.Snapshot verified =
-                    SplitCacheIndex.verify(outputRoot, cached.get());
-
+            SplitCacheIndex.Snapshot verified = cached.get();
             SplitGeneration generation = SplitGeneration.create(
                     verified.sourceHash(),
                     verified.packs()
@@ -94,7 +96,8 @@ public final class SplitCoordinator {
 
             String hash = Hashes.sha1(normalizedSource);
 
-            Optional<SplitCacheIndex.Snapshot> previousCache = loadCacheForReuseBestEffort();
+            Optional<SplitCacheIndex.Snapshot> previousCache =
+                    loadCompatibleVerifiedCacheBestEffort();
             List<SplitPack> reusablePacks = previousCache
                     .map(SplitCacheIndex.Snapshot::packs)
                     .orElseGet(List::of);
@@ -114,9 +117,12 @@ public final class SplitCoordinator {
 
             beforePublish.accept(generation.packs());
 
-            // index.json is the durable publication pointer. All referenced blobs
-            // already exist in the immutable content-addressed store.
-            SplitCacheIndex.write(outputRoot, hash, generation.packs());
+            SplitCacheIndex.write(
+                    outputRoot,
+                    hash,
+                    generation.packs(),
+                    outputCompatibility
+            );
 
             snapshot.updateAndGet(current -> new CoordinatorSnapshot(
                     SplitState.READY,
@@ -142,18 +148,34 @@ public final class SplitCoordinator {
         ));
     }
 
-    private Optional<SplitCacheIndex.Snapshot> loadCacheForReuseBestEffort() {
+    private Optional<SplitCacheIndex.Snapshot> loadCompatibleVerifiedCache()
+            throws IOException {
+        Optional<SplitCacheIndex.ReadResult> cached =
+                SplitCacheIndex.read(outputRoot, outputCompatibility);
+
+        if (cached.isEmpty() || !cached.get().isCompatible()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                SplitCacheIndex.verify(outputRoot, cached.get().snapshot())
+        );
+    }
+
+    private Optional<SplitCacheIndex.Snapshot> loadCompatibleVerifiedCacheBestEffort() {
         try {
-            LegacyCacheMigration.migrateIfNeeded(outputRoot);
-
-            Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
-            if (cached.isEmpty()) {
-                return Optional.empty();
-            }
-
-            return Optional.of(SplitCacheIndex.verify(outputRoot, cached.get()));
+            return loadCompatibleVerifiedCache();
         } catch (IOException | RuntimeException ignored) {
             return Optional.empty();
+        }
+    }
+
+    private void importLegacyBlobsBestEffort() {
+        try {
+            LegacyCacheMigration.importBlobsIfNeeded(outputRoot);
+        } catch (IOException | RuntimeException ignored) {
+            // Legacy metadata cannot prove current output compatibility.
+            // Failed import is therefore a cache miss, not a publication failure.
         }
     }
 
@@ -161,7 +183,7 @@ public final class SplitCoordinator {
         try {
             SplitRecovery.cleanupLegacyArtifacts(outputRoot);
         } catch (IOException | RuntimeException ignored) {
-            // Legacy files are no longer authoritative once index.json is committed.
+            // Legacy files are no longer authoritative once current index.json is committed.
         }
     }
 
@@ -193,6 +215,10 @@ public final class SplitCoordinator {
 
     public SplitterConfig config() {
         return config;
+    }
+
+    public OutputCompatibility outputCompatibility() {
+        return outputCompatibility;
     }
 
     public Path outputRoot() {

@@ -26,7 +26,8 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Never remap an already issued content-addressed URL to different bytes.
 - Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
 - `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.
-- Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Mutation belongs only to generation, legacy migration, or explicit cleanup.
+- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip`. Diagnostic settings such as `logPackSizes` are not output compatibility.
+- Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Incompatible or metadata-free old caches are cache misses, not current output. Mutation belongs only to generation, legacy blob import, or explicit cleanup.
 - Publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed.
 - Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
 - Keep historical hosted blobs/URLs valid while a server is running. Garbage-collect unreferenced blobs only after a successful startup restore or another explicitly safe lifecycle point.
