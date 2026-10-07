@@ -33,21 +33,22 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 
 | Target | Java | Generation | AutoHost adapter | Commands |
 | --- | ---: | --- | --- | --- |
-| 1.21.8 | 21 | `versions/legacy` | resource-location | legacy |
-| 1.21.9-1.21.10 | 21 | `versions/legacy` | resource-location | legacy |
-| 1.21.11 | 21 | `versions/legacy` | identifier-legacy | modern command API |
-| 26.1-26.3 | 25 | `versions/modern` | identifier-modern | modern |
+| 1.21.8 | 21 | legacy events | PacketTweaker + `ResourceLocation` ID | legacy permission |
+| 1.21.9-1.21.10 | 21 | legacy events | PacketTweaker + `ResourceLocation` ID | legacy permission |
+| 1.21.11 | 21 | legacy events | PacketTweaker + `Identifier` ID | modern permission |
+| 26.1-26.3 | 25 | modern events | Fabric `PacketContext` + `Identifier` ID | modern permission |
 
 Before changing a Polymer integration point, inspect the matching upstream branch: `dev/1.21.6`, `dev/1.21.9`, `dev/1.21.11`, `dev/26.1`, `dev/26.2`, or `dev/26.3`.
 
 ## Repository map
 
 - `common` — splitter, identity, lifecycle snapshots, cache, immutable hosted blobs, provider-independent records.
-- `versions/shared` — Fabric initializer, config, shared resources.
-- `versions/legacy`, `versions/modern` — Polymer generation hooks.
-- `versions/autohost-*` — provider/context/packet integration.
+- `versions/shared` — Fabric initializer/config plus shared command, hosting/delivery, and publication orchestration.
+- `versions/legacy`, `versions/modern` — generation-event/path adapters only.
+- `versions/autohost-legacy`, `versions/autohost-modern` — packet-context/readiness/provider adapters.
+- `versions/pack-id-*` — the `ResourceLocation` / `Identifier` construction boundary.
 - `versions/mixin-*` — original Polymer main-pack suppression only.
-- `versions/commands-*` — command API differences.
+- `versions/commands-*` — permission predicate adapters only.
 - `versions/mc-*` — dependency/version wiring only.
 - `gradle/version-module.gradle` — shared version-module assembly.
 

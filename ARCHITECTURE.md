@@ -54,16 +54,17 @@ common/
     SplitCacheIndex
 
 versions/
-  shared/                         shared Fabric initializer/config/resources
-  legacy/                         1.21.x Polymer generation hook
-  modern/                         26.x Polymer generation hook
-  autohost-resource-location/     1.21.8-1.21.10 AutoHost adapter
-  autohost-identifier-legacy/     1.21.11 AutoHost adapter
-  autohost-identifier-modern/     26.x AutoHost adapter
+  shared/                         initializer/config + shared delivery/commands/publication
+  legacy/                         legacy Polymer generation-event/path adapter
+  modern/                         modern Polymer generation-event/result adapter
+  autohost-legacy/                PacketTweaker context/readiness adapter
+  autohost-modern/                Fabric PacketContext/readiness adapter
+  pack-id-resource-location/      ResourceLocation hosted-ID adapter
+  pack-id-identifier/             Identifier hosted-ID adapter
   mixin-legacy/                   1.21.x main-pack suppression
   mixin-modern/                   26.x main-pack suppression
-  commands-legacy/                1.21.8-1.21.10 commands
-  commands-modern/                1.21.11+ commands
+  commands-legacy/                legacy permission predicate
+  commands-modern/                modern permission predicate
   mc-*/                           dependency/version wiring
 ```
 
@@ -89,6 +90,9 @@ Polymer resource-pack generation
         |
         v
 PolymerGenerationHook
+        |
+        v
+SplitPublisher (shared)
         |
         v
 SplitCoordinator
@@ -474,25 +478,43 @@ The command reports targeted players, ready players, selected packs, and packet 
 
 ## 16. Version adaptation rules
 
-Version-specific code exists only where upstream APIs differ.
+Version-specific source now contains only actual upstream API boundaries. Shared orchestration lives in `versions/shared`.
 
-### 1.21.x generation
+### Shared orchestration
 
-`versions/legacy` handles Runnable-style resource-pack completion events and resolves Polymer's generated server ZIP path.
+- `PolymerAutoHostBridge`: hosting gate, immutable hosted-file materialization, pack selection, and public bridge API.
+- `HostingPolicy`: provider-type classification.
+- `SplitDelivery`: primary pack selection, effective UUIDs, targeted pack selection, and push accounting.
+- `SplitPublisher`: generation publication and logging.
+- `PolymerSplitterCommands`: the complete command tree and handlers.
 
-### 26.x generation
+### Generation adapters
 
-`versions/modern` consumes `OutputGenerator.Result`, including Polymer's `hadIssues()` signal.
+`versions/legacy/PolymerGenerationHook` handles Runnable-style completion events, legacy generated-pack path resolution, and the legacy rebuild callback signature.
 
-### AutoHost identifier/context APIs
+`versions/modern/PolymerGenerationHook` handles `OutputGenerator.Result`, `hadIssues()`, and the modern rebuild callback signature.
 
-- 1.21.8-1.21.10: `ResourceLocation`-based adapter.
-- 1.21.11: `Identifier` with PacketTweaker `PacketContext`.
-- 26.x: `Identifier` with Fabric networking `PacketContext`.
+Both delegate actual split publication to shared `SplitPublisher`.
+
+### AutoHost adapters
+
+`versions/autohost-legacy/AutoHostAccess` is shared by 1.21.8 through 1.21.11 and owns PacketTweaker `PacketContext`, legacy provider readiness, collector property creation, packet push, and the current internal AutoHost config/file-map access.
+
+`versions/autohost-modern/AutoHostAccess` owns the corresponding 26.x Fabric networking `PacketContext` boundary plus `RESOURCE_PACKS_READY`.
+
+Identifier construction is independent of the context boundary:
+
+- 1.21.8-1.21.10: `pack-id-resource-location/PackIdentifier`.
+- 1.21.11 and 26.x: `pack-id-identifier/PackIdentifier`.
+
+### Command permission adapters
+
+The command tree is shared. `versions/commands-legacy/CommandPermissions` uses the legacy permission-level API; `versions/commands-modern/CommandPermissions` uses the modern permission object API.
 
 ### Mixins
 
-Mixins exist only to suppress Polymer's original main pack. Do not move general integration logic into Mixins.
+Mixins remain version-specific only for original Polymer main-pack suppression. Do not move general integration logic into Mixins.
+
 
 ## 17. Failure semantics
 

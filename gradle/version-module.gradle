@@ -8,6 +8,7 @@ sourceSets {
         java.srcDir rootProject.file("versions/shared/src/main/java")
         java.srcDir rootProject.file(adapter_source)
         java.srcDir rootProject.file(autohost_adapter_source)
+        java.srcDir rootProject.file(pack_identifier_source)
         java.srcDir rootProject.file(mixin_source)
         java.srcDir rootProject.file(command_source)
         resources.srcDir rootProject.file("versions/shared/src/main/resources")
