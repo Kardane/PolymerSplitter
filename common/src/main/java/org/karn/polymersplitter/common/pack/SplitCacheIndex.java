@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -104,11 +105,9 @@ public final class SplitCacheIndex {
                 );
             }
 
-            Path verifiedPath = verifyCachedPack(root, indexedPath, raw);
-
             packs.add(new SplitPack(
                     raw.namespace(),
-                    verifiedPath,
+                    indexedPath,
                     raw.fingerprint(),
                     raw.sha1(),
                     raw.uuid(),
@@ -116,8 +115,63 @@ public final class SplitCacheIndex {
             ));
         }
 
-        reconcileGeneration(outputRoot, sourceHash, packs);
         return Optional.of(new Snapshot(sourceHash, List.copyOf(packs)));
+    }
+
+    public static Verification verify(
+            Path outputRoot,
+            Snapshot snapshot
+    ) throws IOException {
+        Path root = outputRoot.toAbsolutePath().normalize();
+        Objects.requireNonNull(snapshot, "snapshot");
+
+        List<String> restoreNamespaces = new ArrayList<>();
+
+        for (SplitPack pack : snapshot.packs()) {
+            if (isValidPackFile(pack.path(), pack.sha1(), pack.size())) {
+                continue;
+            }
+
+            if (HostedPackStore.findValidBlob(root, pack.sha1(), pack.size()).isPresent()) {
+                restoreNamespaces.add(pack.namespace());
+                continue;
+            }
+
+            throw new IOException(
+                    "Cached split pack is missing or corrupted for namespace " + pack.namespace()
+            );
+        }
+
+        return new Verification(snapshot, List.copyOf(restoreNamespaces));
+    }
+
+    public static Snapshot repair(
+            Path outputRoot,
+            Verification verification
+    ) throws IOException {
+        Path root = outputRoot.toAbsolutePath().normalize();
+        Objects.requireNonNull(verification, "verification");
+
+        Snapshot snapshot = verification.snapshot();
+
+        for (String namespace : verification.restoreNamespaces()) {
+            SplitPack pack = snapshot.packs().stream()
+                    .filter(candidate -> candidate.namespace().equals(namespace))
+                    .findFirst()
+                    .orElseThrow(() -> new IOException(
+                            "Cache repair references unknown namespace " + namespace
+                    ));
+
+            HostedPackStore.restoreGenerationFile(
+                    root,
+                    pack.sha1(),
+                    pack.size(),
+                    pack.path()
+            );
+        }
+
+        reconcileGeneration(root, snapshot.sourceHash(), snapshot.packs());
+        return snapshot;
     }
 
     public static void reconcileGeneration(
@@ -282,35 +336,6 @@ public final class SplitCacheIndex {
         );
     }
 
-    private static Path verifyCachedPack(
-            Path root,
-            Path indexedPath,
-            RawPack raw
-    ) throws IOException {
-        if (isValidPackFile(indexedPath, raw.sha1(), raw.size())) {
-            return indexedPath;
-        }
-
-        Optional<Path> hosted = HostedPackStore.findValidBlob(
-                root,
-                raw.sha1(),
-                raw.size()
-        );
-
-        if (hosted.isPresent()) {
-            return HostedPackStore.restoreGenerationFile(
-                    root,
-                    raw.sha1(),
-                    raw.size(),
-                    indexedPath
-            );
-        }
-
-        throw new IOException(
-                "Cached split pack is missing or corrupted for namespace " + raw.namespace()
-        );
-    }
-
     private static boolean isValidPackFile(
             Path path,
             String sha1,
@@ -355,5 +380,19 @@ public final class SplitCacheIndex {
     }
 
     public record Snapshot(String sourceHash, List<SplitPack> packs) {
+        public Snapshot {
+            Objects.requireNonNull(sourceHash, "sourceHash");
+            packs = List.copyOf(packs);
+        }
+    }
+
+    public record Verification(
+            Snapshot snapshot,
+            List<String> restoreNamespaces
+    ) {
+        public Verification {
+            Objects.requireNonNull(snapshot, "snapshot");
+            restoreNamespaces = List.copyOf(restoreNamespaces);
+        }
     }
 }

@@ -23,7 +23,9 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Keep namespace UUIDs stable. The primary pack uses Polymer's main UUID; non-primary packs use deterministic namespace UUIDs.
 - Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs.
 - Never remap an already issued content-addressed URL to different bytes.
-- Treat one `SplitGeneration` as the atomic active snapshot. Publish only after hosting, generation reconciliation, and cache-index commit succeed.
+- Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
+- Keep cache loading explicit: `SplitCacheIndex.read()` is side-effect-free metadata parsing; file verification and repair are separate phases.
+- Publish only after hosting, generation reconciliation, and cache-index commit succeed.
 - Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
 - Keep historical hosted URLs valid while a server is running; clear only PolymerSplitter-owned in-memory mappings after full server stop.
 - Prefer public Polymer APIs. Mixins exist only for original-main-pack suppression and should stay minimal.

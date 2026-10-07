@@ -37,6 +37,7 @@ common/
     PackPushResult
   lifecycle/
     SplitCoordinator
+    CoordinatorSnapshot
     SplitGeneration
     NamespaceTransition
     SplitRegistry
@@ -122,10 +123,15 @@ HostedPackStore
 PolymerAutoHostBridge.registerHostedPacks
         |
         v
-SplitRegistry.replace(...)
+CoordinatorSnapshot atomic publish
+        |
+        +--> state = READY
+        +--> generation = SplitGeneration
+        +--> lastFailure = null
+        +--> NamespaceTransition
         |
         v
-state = READY
+SplitRegistry read-only view
         |
         v
 SEND_RESOURCE_PACK_COLLECTOR
@@ -144,7 +150,9 @@ Vanilla client
 
 ## 6. Lifecycle and publication
 
-`SplitCoordinator` owns the split lifecycle:
+`SplitCoordinator` owns one atomic `CoordinatorSnapshot` containing lifecycle state, active `SplitGeneration`, last failure, and the last namespace transition. `SplitRegistry` has no independent mutable state; it is a read-only view over the same snapshot.
+
+The split lifecycle is:
 
 ```text
 NOT_STARTED
@@ -172,13 +180,12 @@ A newly generated resource-pack generation is published in this order:
 5. Register content-addressed hosted identifiers with Polymer AutoHost.
 6. Reconcile the generation directory to the exact namespace set and rewrite its manifest.
 7. Atomically commit `current-cache.tsv`.
-8. Atomically replace the in-memory `SplitGeneration` snapshot.
-9. Mark the coordinator `READY`.
-10. Opportunistically clean old generation directories.
+8. Atomically publish one `CoordinatorSnapshot` containing `READY`, the new `SplitGeneration`, cleared failure state, and the computed namespace transition.
+9. Opportunistically clean old generation directories.
 
 If steps 1-4 fail, the previous registry remains intact and the coordinator becomes `FAILED`. Main-pack suppression is active only while the coordinator is `READY` and the registry is non-empty.
 
-The registry stores one immutable `SplitGeneration` containing the source hash, deterministic pack order, and exact namespace map. The swap is atomic. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
+The active `SplitGeneration` contains the source hash, deterministic pack order, and exact namespace map. It is stored inside the same atomic `CoordinatorSnapshot` as the lifecycle state, so readers cannot observe a READY state paired with a different registry generation. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
 
 Before the registry advances, the generation directory is reconciled so stale namespace ZIPs are removed, the manifest is rewritten from the exact pack set, and the cache index is atomically committed. A cache-index write failure therefore prevents the new generation from becoming `READY`.
 
@@ -305,23 +312,15 @@ A shared metadata change therefore invalidates all namespace fingerprints.
 
 ### Cache validation and recovery
 
-`SplitCacheIndex.read(...)` is a validated read, not a metadata-only parse. It verifies:
+Cache loading is deliberately split into three phases:
 
-- cache format and source SHA-1 syntax,
-- unique and valid namespaces,
-- SHA-256 fingerprint syntax,
-- final ZIP SHA-1 syntax,
-- deterministic namespace UUIDs,
-- non-negative sizes,
-- generation-relative pack paths,
-- expected `<namespace>.zip` file names,
-- actual file size and SHA-1.
+1. `SplitCacheIndex.read(...)` parses `current-cache.tsv` and validates metadata only: format/source SHA-1, unique namespaces, fingerprints, final SHA-1 values, deterministic UUIDs, sizes, safe generation-relative paths, and expected `<namespace>.zip` names. It does not hash, restore, delete, or rewrite files.
+2. `SplitCacheIndex.verify(...)` is read-only filesystem verification. It checks generation ZIP size/SHA-1 and, when a generation ZIP is missing or invalid, verifies whether the matching immutable `hosted/<sha1>.zip` can repair it. It returns a repair plan and performs no mutation.
+3. `SplitCacheIndex.repair(...)` performs the planned hosted-blob restoration, reconciles the generation directory to the exact cached namespace set, removes stale namespace ZIPs, and rewrites the manifest.
 
-If the indexed generation ZIP is missing or corrupted, the corresponding immutable `hosted/<sha1>.zip` may be used as the recovery source when it passes the same size/SHA-1 verification. Recovery materializes that blob back into the expected `generation-<source-sha1>/<namespace>.zip` path before publication.
+This separation keeps metadata reads predictable while preserving Phase 12 recovery behavior.
 
-The generation directory is then reconciled to the exact cached namespace set and its manifest is rewritten. Extra stale namespace ZIPs under the active generation directory are removed.
-
-The registry is restored only after all cached packs validate and AutoHost registration succeeds. One invalid namespace invalidates the entire startup recovery; partial cached delivery is not published.
+The coordinator is restored only after metadata read, file verification, explicit repair, and AutoHost registration all succeed. One invalid namespace invalidates the entire startup recovery; partial cached delivery is not published.
 
 ### Reuse
 
@@ -412,8 +411,8 @@ Suppression is disabled unless:
 
 ```text
 enabled
-AND coordinator.state == READY
-AND split registry is not empty
+AND coordinator.snapshot.state == READY
+AND coordinator.snapshot.generation != null
 ```
 
 Therefore failed or incomplete split generation falls back to Polymer's main pack.

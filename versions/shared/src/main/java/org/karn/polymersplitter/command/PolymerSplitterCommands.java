@@ -53,10 +53,13 @@ public final class PolymerSplitterCommands {
 
     private static int status(CommandSourceStack source) {
         var coordinator = PolymerSplitter.coordinator();
-        var packs = PolymerSplitter.registry().currentPacks();
+        var snapshot = coordinator.snapshot();
+        var packs = snapshot.generation() == null
+                ? java.util.List.<SplitPack>of()
+                : snapshot.generation().packs();
 
         source.sendSuccess(() -> Component.literal(
-                "PolymerSplitter: " + coordinator.state()
+                "PolymerSplitter: " + snapshot.state()
                         + " | enabled=" + PolymerSplitter.isEnabled()
                         + " | packs=" + packs.size()
                         + " | total=" + Format.formatBytes(totalSize(packs))
@@ -75,7 +78,7 @@ public final class PolymerSplitterCommands {
             ), false);
         }
 
-        var transition = coordinator.lastTransition();
+        var transition = snapshot.lastTransition();
         source.sendSuccess(() -> Component.literal(
                 "Namespaces: +" + transition.added().size()
                         + " -" + transition.removed().size()
@@ -83,15 +86,15 @@ public final class PolymerSplitterCommands {
                         + " =" + transition.unchanged().size()
         ), false);
 
-        if (coordinator.sourceHash() != null) {
+        if (snapshot.sourceHash() != null) {
             source.sendSuccess(() -> Component.literal(
-                    "Source SHA-1: " + coordinator.sourceHash()
+                    "Source SHA-1: " + snapshot.sourceHash()
             ), false);
         }
 
-        if (coordinator.lastFailure() != null) {
+        if (snapshot.lastFailure() != null) {
             source.sendSuccess(() -> Component.literal(
-                    "Last failure: " + coordinator.lastFailure()
+                    "Last failure: " + snapshot.lastFailure()
             ), false);
         }
 
@@ -136,8 +139,9 @@ public final class PolymerSplitterCommands {
             return 0;
         }
 
-        var generation = PolymerSplitter.registry().currentGeneration();
-        if (generation == null || PolymerSplitter.coordinator().state() != SplitState.READY) {
+        var snapshot = PolymerSplitter.coordinator().snapshot();
+        var generation = snapshot.generation();
+        if (generation == null || snapshot.state() != SplitState.READY) {
             source.sendFailure(Component.literal("No split generation is ready"));
             return 0;
         }

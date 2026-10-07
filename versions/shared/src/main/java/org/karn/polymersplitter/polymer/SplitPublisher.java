@@ -41,12 +41,13 @@ final class SplitPublisher {
 
     private static void logGeneration(SplitCoordinator coordinator, List<SplitPack> packs) {
         long totalSize = packs.stream().mapToLong(SplitPack::size).sum();
-        var transition = coordinator.lastTransition();
+        var snapshot = coordinator.snapshot();
+        var transition = snapshot.lastTransition();
 
         LOGGER.log(System.Logger.Level.INFO,
                 "Published split generation: packs=" + packs.size()
                         + ", total=" + Format.formatBytes(totalSize)
-                        + ", sourceSha1=" + coordinator.sourceHash()
+                        + ", sourceSha1=" + snapshot.sourceHash()
                         + ", added=" + transition.added().size()
                         + ", removed=" + transition.removed().size()
                         + ", changed=" + transition.changed().size()

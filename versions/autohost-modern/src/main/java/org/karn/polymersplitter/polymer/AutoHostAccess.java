@@ -27,15 +27,14 @@ final class AutoHostAccess {
 
     static void registerPackCollector(SplitCoordinator coordinator) {
         AutoHostUtils.SEND_RESOURCE_PACK_COLLECTOR.register((provider, context, consumer) -> {
-            if (coordinator.state() != SplitState.READY
+            var snapshot = coordinator.snapshot();
+            if (snapshot.state() != SplitState.READY
+                    || snapshot.generation() == null
                     || !PolymerAutoHostBridge.currentHostingStatus().supported()) {
                 return;
             }
 
-            List<SplitPack> packs = coordinator.registry().currentPacks();
-            if (packs.isEmpty()) {
-                return;
-            }
+            List<SplitPack> packs = snapshot.generation().packs();
 
             String primaryNamespace = SplitDelivery.primaryNamespace(packs);
             for (SplitPack pack : packs) {
@@ -51,7 +50,7 @@ final class AutoHostAccess {
 
     static void registerReadiness(SplitCoordinator coordinator) {
         AutoHostUtils.RESOURCE_PACKS_READY.register((provider, context) ->
-                coordinator.state() != SplitState.GENERATING
+                coordinator.snapshot().state() != SplitState.GENERATING
         );
     }
 

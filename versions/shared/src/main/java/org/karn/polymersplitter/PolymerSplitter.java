@@ -33,14 +33,13 @@ public final class PolymerSplitter implements ModInitializer {
             throw new IllegalStateException("Failed to load PolymerSplitter config", e);
         }
 
-        registry = new SplitRegistry();
         coordinator = new SplitCoordinator(
                 configDirectory
                         .resolve("polymersplitter")
                         .resolve("generated"),
-                config.toSplitterConfig(),
-                registry
+                config.toSplitterConfig()
         );
+        registry = coordinator.registry();
 
         PolymerSplitterCommands.register();
 
@@ -75,7 +74,7 @@ public final class PolymerSplitter implements ModInitializer {
                             + hosting.providerType() + "': " + hosting.message());
         }
 
-        if (coordinator.state() != SplitState.NOT_STARTED) {
+        if (coordinator.snapshot().state() != SplitState.NOT_STARTED) {
             return;
         }
 
@@ -145,9 +144,8 @@ public final class PolymerSplitter implements ModInitializer {
     public static boolean shouldUseSplitPacks() {
         return isEnabled()
                 && coordinator != null
-                && coordinator.state() == SplitState.READY
-                && registry != null
-                && !registry.isEmpty()
+                && coordinator.snapshot().state() == SplitState.READY
+                && coordinator.snapshot().generation() != null
                 && PolymerAutoHostBridge.currentHostingStatus().supported();
     }
 

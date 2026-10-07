@@ -18,24 +18,23 @@ import java.util.function.Consumer;
 public final class SplitCoordinator {
     private final Path outputRoot;
     private final SplitterConfig config;
-    private final SplitRegistry registry;
     private final PackSplitter splitter = new PackSplitter();
+    private final AtomicReference<CoordinatorSnapshot> snapshot =
+            new AtomicReference<>(CoordinatorSnapshot.initial());
+    private final SplitRegistry registry = new SplitRegistry(snapshot);
 
-    private final AtomicReference<SplitState> state = new AtomicReference<>(SplitState.NOT_STARTED);
-    private final AtomicReference<String> sourceHash = new AtomicReference<>();
-    private final AtomicReference<String> lastFailure = new AtomicReference<>();
-    private final AtomicReference<NamespaceTransition> lastTransition =
-            new AtomicReference<>(NamespaceTransition.empty());
-
-    public SplitCoordinator(Path outputRoot, SplitterConfig config, SplitRegistry registry) {
+    public SplitCoordinator(Path outputRoot, SplitterConfig config) {
         this.outputRoot = Objects.requireNonNull(outputRoot, "outputRoot").toAbsolutePath().normalize();
         this.config = Objects.requireNonNull(config, "config");
-        this.registry = Objects.requireNonNull(registry, "registry");
     }
 
     public void markGenerating() {
-        state.set(SplitState.GENERATING);
-        lastFailure.set(null);
+        snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                SplitState.GENERATING,
+                current.generation(),
+                null,
+                current.lastTransition()
+        ));
     }
 
     public synchronized Optional<List<SplitPack>> restore(
@@ -49,19 +48,24 @@ public final class SplitCoordinator {
                 return Optional.empty();
             }
 
-            SplitCacheIndex.Snapshot snapshot = cached.get();
+            SplitCacheIndex.Verification verification =
+                    SplitCacheIndex.verify(outputRoot, cached.get());
+            SplitCacheIndex.Snapshot repaired =
+                    SplitCacheIndex.repair(outputRoot, verification);
+
             SplitGeneration generation = SplitGeneration.create(
-                    snapshot.sourceHash(),
-                    snapshot.packs()
+                    repaired.sourceHash(),
+                    repaired.packs()
             );
 
             beforePublish.accept(generation.packs());
 
-            NamespaceTransition transition = registry.replace(generation);
-            sourceHash.set(generation.sourceHash());
-            lastFailure.set(null);
-            lastTransition.set(transition);
-            state.set(SplitState.READY);
+            snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                    SplitState.READY,
+                    generation,
+                    null,
+                    NamespaceTransition.between(current.generation(), generation)
+            ));
 
             return Optional.of(generation.packs());
         } catch (IOException | RuntimeException e) {
@@ -88,7 +92,7 @@ public final class SplitCoordinator {
             String hash = Hashes.sha1(normalizedSource);
             Path generationDirectory = outputRoot.resolve("generation-" + hash);
 
-            Optional<SplitCacheIndex.Snapshot> previousCache = readCacheBestEffort();
+            Optional<SplitCacheIndex.Snapshot> previousCache = loadCacheForReuseBestEffort();
             List<SplitPack> reusablePacks = previousCache
                     .map(SplitCacheIndex.Snapshot::packs)
                     .orElseGet(List::of);
@@ -111,15 +115,16 @@ public final class SplitCoordinator {
             beforePublish.accept(generation.packs());
 
             // The cache index is part of publication state, not best-effort metadata.
-            // It must be atomically committed before the in-memory registry advances.
+            // It must be atomically committed before the coordinator snapshot advances.
             SplitCacheIndex.reconcileGeneration(outputRoot, hash, generation.packs());
             SplitCacheIndex.write(outputRoot, hash, generation.packs());
 
-            NamespaceTransition transition = registry.replace(generation);
-            sourceHash.set(hash);
-            lastFailure.set(null);
-            lastTransition.set(transition);
-            state.set(SplitState.READY);
+            snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                    SplitState.READY,
+                    generation,
+                    null,
+                    NamespaceTransition.between(current.generation(), generation)
+            ));
 
             cleanupOldGenerationsBestEffort(
                     hash,
@@ -134,16 +139,24 @@ public final class SplitCoordinator {
     }
 
     public synchronized void resetForServerStop() {
-        NamespaceTransition transition = registry.clear();
-        sourceHash.set(null);
-        lastFailure.set(null);
-        lastTransition.set(transition);
-        state.set(SplitState.NOT_STARTED);
+        snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                SplitState.NOT_STARTED,
+                null,
+                null,
+                NamespaceTransition.between(current.generation(), null)
+        ));
     }
 
-    private Optional<SplitCacheIndex.Snapshot> readCacheBestEffort() {
+    private Optional<SplitCacheIndex.Snapshot> loadCacheForReuseBestEffort() {
         try {
-            return SplitCacheIndex.read(outputRoot);
+            Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
+            if (cached.isEmpty()) {
+                return Optional.empty();
+            }
+
+            SplitCacheIndex.Verification verification =
+                    SplitCacheIndex.verify(outputRoot, cached.get());
+            return Optional.of(SplitCacheIndex.repair(outputRoot, verification));
         } catch (IOException | RuntimeException ignored) {
             return Optional.empty();
         }
@@ -159,12 +172,24 @@ public final class SplitCoordinator {
 
     public void markFailed(Throwable failure) {
         Objects.requireNonNull(failure, "failure");
-        lastFailure.set(failure.getMessage() != null ? failure.getMessage() : failure.getClass().getName());
-        state.set(SplitState.FAILED);
+        String message = failure.getMessage() != null
+                ? failure.getMessage()
+                : failure.getClass().getName();
+
+        snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                SplitState.FAILED,
+                current.generation(),
+                message,
+                current.lastTransition()
+        ));
+    }
+
+    public CoordinatorSnapshot snapshot() {
+        return snapshot.get();
     }
 
     public SplitState state() {
-        return state.get();
+        return snapshot().state();
     }
 
     public SplitRegistry registry() {
@@ -180,14 +205,14 @@ public final class SplitCoordinator {
     }
 
     public String sourceHash() {
-        return sourceHash.get();
+        return snapshot().sourceHash();
     }
 
     public String lastFailure() {
-        return lastFailure.get();
+        return snapshot().lastFailure();
     }
 
     public NamespaceTransition lastTransition() {
-        return lastTransition.get();
+        return snapshot().lastTransition();
     }
 }
