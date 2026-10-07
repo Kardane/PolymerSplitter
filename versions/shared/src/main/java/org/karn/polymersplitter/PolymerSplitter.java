@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 import org.karn.polymersplitter.common.lifecycle.SplitRegistry;
+import org.karn.polymersplitter.common.lifecycle.SplitState;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 import org.karn.polymersplitter.polymer.PolymerAutoHostBridge;
 import org.karn.polymersplitter.polymer.PolymerGenerationHook;
@@ -21,8 +22,12 @@ public final class PolymerSplitter implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        PolymerAutoHostBridge.registerPackCollector(REGISTRY);
+        PolymerAutoHostBridge.registerPackCollector(COORDINATOR);
         PolymerGenerationHook.register(COORDINATOR);
+    }
+
+    public static boolean shouldUseSplitPacks() {
+        return COORDINATOR.state() == SplitState.READY && !REGISTRY.isEmpty();
     }
 
     public static SplitCoordinator coordinator() {

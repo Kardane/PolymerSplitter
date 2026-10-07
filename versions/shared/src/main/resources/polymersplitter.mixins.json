@@ -1,0 +1,10 @@
+{
+  "required": true,
+  "package": "org.karn.polymersplitter.mixin",
+  "mixins": [
+    "AbstractProviderMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
