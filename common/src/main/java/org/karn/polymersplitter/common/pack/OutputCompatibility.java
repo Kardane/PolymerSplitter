@@ -12,7 +12,7 @@ public record OutputCompatibility(
         List<String> includeNamespaces,
         List<String> excludeNamespaces
 ) {
-    public static final int CURRENT_ALGORITHM_VERSION = 5;
+    public static final int CURRENT_ALGORITHM_VERSION = 6;
 
     public OutputCompatibility {
         if (algorithmVersion <= 0) {

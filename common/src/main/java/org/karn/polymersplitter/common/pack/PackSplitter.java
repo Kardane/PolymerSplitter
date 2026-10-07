@@ -28,10 +28,13 @@ public final class PackSplitter {
     private static final String PACK_META = "pack.mcmeta";
     private static final String PACK_ICON = "pack.png";
     private static final String MCASSETS_ROOT = "assets/.mcassetsroot";
+    private static final String MINECRAFT_NAMESPACE = "minecraft";
+    private static final String MINECRAFT_SOUNDS_PACK = "minecraft.sounds";
+    private static final String MINECRAFT_SOUNDS_PREFIX = "assets/minecraft/sounds/";
     private static final LocalDateTime DETERMINISTIC_TIME = LocalDateTime.of(1980, 1, 1, 0, 0);
     private static final int IO_BUFFER_SIZE = 64 * 1024;
     private static final byte[] FINGERPRINT_SCHEMA =
-            "polymersplitter:namespace-fingerprint:v4".getBytes(StandardCharsets.UTF_8);
+            "polymersplitter:physical-pack-fingerprint:v5".getBytes(StandardCharsets.UTF_8);
 
     public List<SplitPack> split(
             Path sourcePack,
@@ -65,8 +68,9 @@ public final class PackSplitter {
             PackMetadata metadata = PackMetadata.read(zip, packMeta);
             ZipEntry packIcon = config.copyPackIcon() ? zip.getEntry(PACK_ICON) : null;
             Map<String, List<ZipEntry>> byNamespace = collectPackLayout(zip, metadata);
-            String primaryNamespace = byNamespace.containsKey("minecraft")
-                    ? "minecraft" : byNamespace.keySet().stream().min(String::compareTo).orElseThrow();
+            extractMinecraftSounds(byNamespace, metadata);
+            String primaryNamespace = byNamespace.containsKey(MINECRAFT_NAMESPACE)
+                    ? MINECRAFT_NAMESPACE : byNamespace.keySet().stream().min(String::compareTo).orElseThrow();
             List<ZipEntry> primaryEntries = byNamespace.get(primaryNamespace);
             long minimumSize = config.minSplitPackSizeBytes();
             byte[] sharedFingerprint = fingerprintSharedFiles(
@@ -85,9 +89,10 @@ public final class PackSplitter {
             for (String namespace : namespaces) {
                 List<ZipEntry> entries = byNamespace.get(namespace);
                 boolean primary = namespace.equals(primaryNamespace);
+                boolean minecraftSoundsPack = MINECRAFT_SOUNDS_PACK.equals(namespace);
                 if (primary) {
                     entries.sort(Comparator.comparing(ZipEntry::getName));
-                } else if (!config.shouldSplitIndependently(namespace)) {
+                } else if (!minecraftSoundsPack && !config.shouldSplitIndependently(namespace)) {
                     primaryEntries.addAll(entries);
                     logPolicyMergedNamespace(namespace, primaryNamespace);
                     continue;
@@ -102,7 +107,8 @@ public final class PackSplitter {
 
                 SplitPack reusable = reusableByNamespace.get(namespace);
                 if (canReuse(reusable, fingerprint)) {
-                    if (!primary && minimumSize > 0 && reusable.size() <= minimumSize) {
+                    if (!primary && !minecraftSoundsPack
+                            && minimumSize > 0 && reusable.size() <= minimumSize) {
                         primaryEntries.addAll(entries);
                         logMergedNamespace(namespace, primaryNamespace, reusable.size());
                         continue;
@@ -136,7 +142,8 @@ public final class PackSplitter {
                             ioBuffer
                     );
 
-                    if (!primary && minimumSize > 0 && written.size() <= minimumSize) {
+                    if (!primary && !minecraftSoundsPack
+                            && minimumSize > 0 && written.size() <= minimumSize) {
                         primaryEntries.addAll(entries);
                         logMergedNamespace(namespace, primaryNamespace, written.size());
                         continue;
@@ -164,6 +171,79 @@ public final class PackSplitter {
 
             return List.copyOf(packs);
         }
+    }
+
+    private static void extractMinecraftSounds(
+            Map<String, List<ZipEntry>> byNamespace,
+            PackMetadata metadata
+    ) throws IOException {
+        List<ZipEntry> minecraftEntries = byNamespace.get(MINECRAFT_NAMESPACE);
+        if (minecraftEntries == null || minecraftEntries.isEmpty()) {
+            return;
+        }
+
+        if (byNamespace.containsKey(MINECRAFT_SOUNDS_PACK)) {
+            LOGGER.log(
+                    System.Logger.Level.WARNING,
+                    "Skipping minecraft sound split because resource namespace '"
+                            + MINECRAFT_SOUNDS_PACK + "' already exists"
+            );
+            return;
+        }
+
+        Set<String> overlayDirectories = new LinkedHashSet<>(metadata.overlayDirectories());
+        List<ZipEntry> sounds = new ArrayList<>();
+
+        for (ZipEntry entry : List.copyOf(minecraftEntries)) {
+            if (!isMinecraftSoundPayload(entry.getName(), overlayDirectories)) {
+                continue;
+            }
+
+            minecraftEntries.remove(entry);
+            sounds.add(entry);
+        }
+
+        if (sounds.isEmpty()) {
+            return;
+        }
+
+        sounds.sort(Comparator.comparing(ZipEntry::getName));
+        minecraftEntries.sort(Comparator.comparing(ZipEntry::getName));
+        byNamespace.put(MINECRAFT_SOUNDS_PACK, sounds);
+
+        LOGGER.log(
+                System.Logger.Level.INFO,
+                "Split minecraft sound payload into '" + MINECRAFT_SOUNDS_PACK
+                        + "': entries=" + sounds.size()
+        );
+    }
+
+    private static boolean isMinecraftSoundPayload(
+            String entryName,
+            Set<String> overlayDirectories
+    ) throws IOException {
+        String name = validateEntryName(entryName);
+        if (isMinecraftSoundRelativePath(name)) {
+            return true;
+        }
+
+        int separator = name.indexOf('/');
+        if (separator <= 0) {
+            return false;
+        }
+
+        String rootDirectory = name.substring(0, separator);
+        if (!overlayDirectories.contains(rootDirectory)) {
+            return false;
+        }
+
+        return isMinecraftSoundRelativePath(name.substring(separator + 1));
+    }
+
+    private static boolean isMinecraftSoundRelativePath(String path) {
+        return path.startsWith(MINECRAFT_SOUNDS_PREFIX)
+                && path.length() > MINECRAFT_SOUNDS_PREFIX.length()
+                && path.endsWith(".ogg");
     }
 
     private static boolean canReuse(SplitPack pack, String fingerprint) {

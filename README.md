@@ -2,7 +2,7 @@
 
 Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer).
 
-PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
+PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost. In addition to namespace packs, Minecraft OGG audio under `assets/minecraft/sounds/` is split into a dedicated `minecraft.sounds` pack.
 
 Safe files outside resource namespaces are preserved only in the primary pack (`minecraft` when present, otherwise the first namespace alphabetically). This includes `assets/icon.png`, license directories, and undeclared overlays; their original paths are retained without inventing overlay declarations. Each pack still includes `pack.mcmeta` and the configured pack icon. Entries with empty names are omitted with a warning.
 
@@ -99,6 +99,8 @@ Namespace policy never discards resources. An empty `includeNamespaces` list mea
 `unreferencedBlobRetentionDays` controls safe startup garbage collection of old content-addressed blobs. `0` keeps the existing behavior and deletes unreferenced blobs at the next successful startup restore, a positive value retains them until they are at least that many days old, and `-1` disables automatic hosted-blob GC. Runtime rebuilds never delete historical blobs.
 
 `minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
+
+When present, `assets/minecraft/sounds/**/*.ogg` is emitted as `minecraft.sounds`. `sounds.json` stays in the primary `minecraft` pack. The sound pack is deliberately not merged by `minSplitPackSizeMb` and can be targeted with `/polymersplitter send <targets> namespace minecraft.sounds`. Declared overlay OGG files follow the same rule.
 
 ## Build
 

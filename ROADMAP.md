@@ -199,9 +199,11 @@ Handle namespaces appearing and disappearing between generations.
 
 ## Phase 15 — `minecraft` namespace optimization
 
+**Status:** in progress
+
 Reduce the remaining large-pack problem caused by many Polymer mods writing into `assets/minecraft`.
 
-This phase requires dependency-aware design before implementation.
+The first implementation is intentionally conservative: move only clearly separable binary sound payloads out of the primary pack while keeping definition/control files in `minecraft`.
 
 ### Investigation
 
@@ -221,9 +223,22 @@ Measure the distribution of:
 
 Do not implement naive file-type splitting. Cross-resource references such as model-to-texture, item-to-model, font providers, atlases, and other dependencies can make independent packs semantically unsafe.
 
+### Implemented first step
+
+- Base and declared-overlay `assets/minecraft/sounds/**/*.ogg` entries are moved into a synthetic physical pack keyed as `minecraft.sounds`.
+- `assets/minecraft/sounds.json` and every non-OGG `minecraft` resource stay in the primary `minecraft` pack.
+- The sound pack has its own deterministic UUID, fingerprint, SHA-1, content-addressed AutoHost ID, cache entry, and targeted-send key.
+- `minecraft.sounds` bypasses namespace include/exclude policy and `minSplitPackSizeMb`; if audio exists, the secondary pack is kept independent.
+- If a real resource namespace named `minecraft.sounds` already exists, synthetic sound splitting is skipped rather than colliding with it.
+- Output algorithm version 6 and physical-pack fingerprint schema v5 invalidate incompatible caches.
+
+### Remaining investigation
+
+Measure whether textures or other resource classes justify further subdivision. Do not add more internal `minecraft` partitions without explicit safety rules.
+
 ### Completion criteria
 
-A secondary split strategy is implemented only if its dependency rules are explicit and safe.
+A broader secondary split strategy is implemented only if its dependency and pack-stack rules are explicit and safe.
 
 ## Phase 16 — Small namespace grouping
 

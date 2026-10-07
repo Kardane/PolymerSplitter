@@ -10,7 +10,7 @@ The design optimizes for one outcome: when only one namespace changes, clients s
 
 ### Goals
 
-- Split the final Polymer-generated resource pack by `assets/<namespace>/`.
+- Split the final Polymer-generated resource pack by `assets/<namespace>/`, with narrowly defined secondary physical packs for safe high-volume payloads such as `minecraft.sounds`.
 - Preserve vanilla-client compatibility.
 - Reuse Polymer AutoHost instead of creating another HTTP stack.
 - Give each namespace a stable identity and content-specific SHA-1.
@@ -362,13 +362,21 @@ On a hit, the cached `SplitGeneration` is reconstructed from the verified packs,
 
 A missing, incompatible, malformed, or unverifiable cache is a fast-path miss. Normal split generation continues; source hash equality by itself is never sufficient.
 
+### `minecraft.sounds` secondary pack
+
+When the source contains `assets/minecraft/sounds/**/*.ogg`, those OGG entries are removed from the primary `minecraft` entry set and emitted as a synthetic physical pack keyed `minecraft.sounds`. The same routing applies inside declared overlay directories. `sounds.json` and all non-OGG `minecraft` resources remain in the primary pack.
+
+The sound pack is not subject to namespace include/exclude policy or `minSplitPackSizeMb`: if qualifying audio exists, it remains independently cacheable. It uses the normal deterministic pack UUID/SHA-1/content-addressed hosting rules; only the primary `minecraft` pack uses Polymer's main UUID.
+
+Because `minecraft.sounds` is a physical pack key rather than a resource namespace, a source pack that already contains a real resource namespace with that exact name creates an identity collision. In that case PolymerSplitter conservatively skips the secondary sound split and leaves the OGG files in the primary `minecraft` pack.
+
 ### New generation
 
-For each namespace:
+For each physical pack candidate:
 
 1. Read the previous index only if its output-compatibility key exactly matches the current splitter configuration/algorithm.
 2. Verify every referenced blob before it becomes a reuse candidate.
-3. Compute the namespace fingerprint.
+3. Compute the physical-pack fingerprint.
 4. If the compatible verified cache has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
 5. Otherwise write one temporary ZIP inside `hosted/`. A SHA-1 `DigestOutputStream` wraps the raw file stream below `ZipOutputStream`, and the configured ZIP compression level is applied before entries are written, so the hash covers the exact emitted compressed ZIP bytes, including the central directory, without reopening the completed temporary file.
 6. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
@@ -632,7 +640,7 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 
 ### Namespace granularity
 
-Many Polymer mods contribute resources to `assets/minecraft`. As a result, `minecraft.zip` can remain large even when other namespaces split efficiently.
+Many Polymer mods contribute resources to `assets/minecraft`. OGG payloads under `minecraft/sounds` are now split into `minecraft.sounds`, but textures, models, item definitions, atlases, fonts, shaders, and other `minecraft` resources remain in the primary pack until their split semantics are explicitly designed.
 
 ### Auxiliary files and undeclared overlays
 
