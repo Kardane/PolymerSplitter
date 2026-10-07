@@ -214,6 +214,7 @@ public final class SplitCacheIndex {
                 outputCompatibility.deterministicZip()
         );
         rootObject.add("output", outputObject);
+        outputObject.addProperty("minSplitPackSizeMb", outputCompatibility.minSplitPackSizeMb());
 
         JsonArray array = new JsonArray();
         Set<String> namespaces = new HashSet<>();
@@ -244,7 +245,7 @@ public final class SplitCacheIndex {
         rootObject.add("packs", array);
 
         Path target = root.resolve(FILE_NAME);
-        Path temp = Files.createTempFile(root, ".index-", ".json.tmp");
+        Path temp = AtomicFiles.createReadableJsonTemp(root, ".index-");
 
         try {
             Files.writeString(
@@ -276,12 +277,15 @@ public final class SplitCacheIndex {
         int algorithmVersion = requireInt(output, "algorithmVersion");
         boolean copyPackIcon = requireBoolean(output, "copyPackIcon");
         boolean deterministicZip = requireBoolean(output, "deterministicZip");
+        int minSplitPackSizeMb = algorithmVersion < 3
+                ? 0 : requireInt(output, "minSplitPackSizeMb");
 
         try {
             return new OutputCompatibility(
                     algorithmVersion,
                     copyPackIcon,
-                    deterministicZip
+                    deterministicZip,
+                    minSplitPackSizeMb
             );
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid output compatibility metadata", e);

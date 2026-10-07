@@ -4,8 +4,11 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import org.karn.polymersplitter.PolymerSplitter;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
@@ -38,6 +41,16 @@ public final class PolymerSplitterCommands {
                                                 )))
                                         .then(Commands.literal("namespace")
                                                 .then(Commands.argument("namespace", StringArgumentType.word())
+                                                        .suggests((context, builder) -> {
+                                                            var snapshot = PolymerSplitter.coordinator().snapshot();
+                                                            var generation = snapshot.generation();
+                                                            return SharedSuggestionProvider.suggest(
+                                                                    snapshot.state() == SplitState.READY && generation != null
+                                                                            ? generation.byNamespace().keySet().stream().sorted()
+                                                                            : java.util.stream.Stream.<String>empty(),
+                                                                    builder
+                                                            );
+                                                        })
                                                         .executes(context -> send(
                                                                 context.getSource(),
                                                                 EntityArgument.getPlayers(context, "targets"),
@@ -58,44 +71,40 @@ public final class PolymerSplitterCommands {
                 ? java.util.List.<SplitPack>of()
                 : snapshot.generation().packs();
 
-        source.sendSuccess(() -> Component.literal(
-                "PolymerSplitter: " + snapshot.state()
-                        + " | enabled=" + PolymerSplitter.isEnabled()
-                        + " | packs=" + packs.size()
-                        + " | total=" + Format.formatBytes(totalSize(packs))
-        ), false);
+        source.sendSuccess(() -> message("Status", ChatFormatting.AQUA)
+                .append(field("state", snapshot.state(), stateColor(snapshot.state())))
+                .append(field("enabled", PolymerSplitter.isEnabled(),
+                        PolymerSplitter.isEnabled() ? ChatFormatting.GREEN : ChatFormatting.YELLOW))
+                .append(field("packs", packs.size(), ChatFormatting.WHITE))
+                .append(field("total", Format.formatBytes(totalSize(packs)), ChatFormatting.WHITE)), false);
 
         var hosting = PolymerAutoHostBridge.currentHostingStatus();
-        source.sendSuccess(() -> Component.literal(
-                "AutoHost: " + hosting.kind()
-                        + " | provider=" + hosting.providerType()
-                        + " | supported=" + hosting.supported()
-        ), false);
+        source.sendSuccess(() -> message("AutoHost", ChatFormatting.AQUA)
+                .append(field("kind", hosting.kind(), ChatFormatting.WHITE))
+                .append(field("provider", hosting.providerType(), ChatFormatting.WHITE))
+                .append(field("supported", hosting.supported(),
+                        hosting.supported() ? ChatFormatting.GREEN : ChatFormatting.YELLOW)), false);
 
         if (!hosting.supported()) {
-            source.sendSuccess(() -> Component.literal(
-                    "AutoHost reason: " + hosting.message()
-            ), false);
+            source.sendSuccess(() -> message("AutoHost reason: " + hosting.message(),
+                    ChatFormatting.YELLOW), false);
         }
 
         var transition = snapshot.lastTransition();
-        source.sendSuccess(() -> Component.literal(
-                "Namespaces: +" + transition.added().size()
-                        + " -" + transition.removed().size()
-                        + " ~" + transition.changed().size()
-                        + " =" + transition.unchanged().size()
-        ), false);
+        source.sendSuccess(() -> message("Namespaces", ChatFormatting.AQUA)
+                .append(field("added", transition.added().size(), ChatFormatting.GREEN))
+                .append(field("removed", transition.removed().size(), ChatFormatting.RED))
+                .append(field("changed", transition.changed().size(), ChatFormatting.YELLOW))
+                .append(field("unchanged", transition.unchanged().size(), ChatFormatting.GRAY)), false);
 
         if (snapshot.sourceHash() != null) {
-            source.sendSuccess(() -> Component.literal(
-                    "Source SHA-1: " + snapshot.sourceHash()
-            ), false);
+            source.sendSuccess(() -> message("Source", ChatFormatting.AQUA)
+                    .append(field("SHA-1", snapshot.sourceHash(), ChatFormatting.GRAY)), false);
         }
 
         if (snapshot.lastFailure() != null) {
-            source.sendSuccess(() -> Component.literal(
-                    "Last failure: " + snapshot.lastFailure()
-            ), false);
+            source.sendSuccess(() -> message("Last failure: " + snapshot.lastFailure(),
+                    ChatFormatting.RED), false);
         }
 
         return 1;
@@ -107,19 +116,16 @@ public final class PolymerSplitterCommands {
                 .toList();
 
         if (packs.isEmpty()) {
-            source.sendSuccess(() -> Component.literal(
-                    "PolymerSplitter: no split packs are ready"
-            ), false);
+            source.sendSuccess(() -> message("No split packs are ready", ChatFormatting.YELLOW), false);
             return 1;
         }
 
+        source.sendSuccess(() -> message("Split packs: " + packs.size(), ChatFormatting.AQUA), false);
         for (SplitPack pack : packs) {
-            source.sendSuccess(() -> Component.literal(
-                    pack.namespace()
-                            + " | " + Format.formatBytes(pack.size())
-                            + " | sha1=" + abbreviate(pack.sha1())
-                            + " | uuid=" + pack.uuid()
-            ), false);
+            source.sendSuccess(() -> message(pack.namespace(), ChatFormatting.GOLD)
+                    .append(field("size", Format.formatBytes(pack.size()), ChatFormatting.WHITE))
+                    .append(field("sha1", abbreviate(pack.sha1()), ChatFormatting.GRAY))
+                    .append(field("uuid", pack.uuid(), ChatFormatting.GRAY)), false);
         }
 
         return packs.size();
@@ -132,9 +138,9 @@ public final class PolymerSplitterCommands {
     ) {
         var hosting = PolymerAutoHostBridge.currentHostingStatus();
         if (!hosting.supported()) {
-            source.sendFailure(Component.literal(
-                    "Split delivery is unavailable: " + hosting.message()
-                            + " (provider=" + hosting.providerType() + ")"
+            source.sendFailure(message(
+                "Split delivery is unavailable: " + hosting.message()
+                            + " (provider=" + hosting.providerType() + ")", ChatFormatting.RED
             ));
             return 0;
         }
@@ -142,55 +148,75 @@ public final class PolymerSplitterCommands {
         var snapshot = PolymerSplitter.coordinator().snapshot();
         var generation = snapshot.generation();
         if (generation == null || snapshot.state() != SplitState.READY) {
-            source.sendFailure(Component.literal("No split generation is ready"));
+            source.sendFailure(message("No split generation is ready", ChatFormatting.RED));
             return 0;
         }
 
         if (namespace != null && !generation.byNamespace().containsKey(namespace)) {
-            source.sendFailure(Component.literal("Unknown split namespace: " + namespace));
+            source.sendFailure(message("Unknown split namespace: " + namespace, ChatFormatting.RED));
             return 0;
         }
 
         var result = PolymerAutoHostBridge.pushSplitPacks(targets, generation, namespace);
         if (result.readyPlayers() == 0) {
-            source.sendFailure(Component.literal(
-                    "AutoHost is not ready for any selected player"
+            source.sendFailure(message(
+                    "AutoHost is not ready for any selected player", ChatFormatting.RED
             ));
             return 0;
         }
 
-        source.sendSuccess(() -> Component.literal(
-                "Pushed " + result.selectedPacks() + " split pack(s) to "
-                        + result.readyPlayers() + "/" + result.targetedPlayers()
-                        + " player(s) (" + result.packetsSent() + " packet(s))"
-        ), true);
+        source.sendSuccess(() -> message("Packs sent", ChatFormatting.GREEN)
+                .append(field("namespace", namespace == null ? "all" : namespace, ChatFormatting.GOLD))
+                .append(field("packs", result.selectedPacks(), ChatFormatting.WHITE))
+                .append(field("players", result.readyPlayers() + "/" + result.targetedPlayers(),
+                        result.readyPlayers() == result.targetedPlayers()
+                                ? ChatFormatting.GREEN : ChatFormatting.YELLOW))
+                .append(field("packets", result.packetsSent(), ChatFormatting.WHITE)), true);
 
         return result.packetsSent();
     }
 
     private static int rebuild(CommandSourceStack source) {
         if (!PolymerSplitter.isEnabled()) {
-            source.sendFailure(Component.literal(
-                    "PolymerSplitter is disabled in config/polymersplitter.json"
+            source.sendFailure(message(
+                    "PolymerSplitter is disabled in config/polymersplitter.json", ChatFormatting.RED
             ));
             return 0;
         }
 
         var hosting = PolymerAutoHostBridge.currentHostingStatus();
         if (!hosting.supported()) {
-            source.sendFailure(Component.literal(
+            source.sendFailure(message(
                     "Split delivery is unavailable: " + hosting.message()
-                            + " (provider=" + hosting.providerType() + ")"
+                            + " (provider=" + hosting.providerType() + ")", ChatFormatting.RED
             ));
             return 0;
         }
 
-        source.sendSuccess(() -> Component.literal(
-                "Requesting Polymer resource-pack rebuild"
-        ), false);
+        source.sendSuccess(() -> message("Requesting Polymer resource-pack rebuild",
+                ChatFormatting.YELLOW), false);
 
         PolymerGenerationHook.requestRebuild(source);
         return 1;
+    }
+
+    private static MutableComponent message(String text, ChatFormatting color) {
+        return Component.literal("[PolymerSplitter] ").withStyle(ChatFormatting.AQUA)
+                .append(Component.literal(text).withStyle(color));
+    }
+
+    private static MutableComponent field(String label, Object value, ChatFormatting color) {
+        return Component.literal(" | " + label + "=").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(String.valueOf(value)).withStyle(color));
+    }
+
+    private static ChatFormatting stateColor(SplitState state) {
+        return switch (state) {
+            case READY -> ChatFormatting.GREEN;
+            case GENERATING -> ChatFormatting.YELLOW;
+            case FAILED -> ChatFormatting.RED;
+            case NOT_STARTED -> ChatFormatting.GRAY;
+        };
     }
 
     private static long totalSize(Iterable<SplitPack> packs) {

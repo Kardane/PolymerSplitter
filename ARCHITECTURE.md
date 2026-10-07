@@ -233,7 +233,6 @@ minecraft.zip
 polymer.zip
   pack.mcmeta
   pack.png
-  LICENSE.txt
   assets/polymer/**
   overlay_legacy/assets/polymer/**
 ```
@@ -242,7 +241,9 @@ The original `pack.mcmeta` bytes are copied unchanged, so Minecraft remains resp
 
 `assets/.mcassetsroot`, including the same path inside a declared overlay, is assigned to the `minecraft` pack.
 
-Root-level files other than `pack.mcmeta` and `pack.png` are copied into every split pack. Files inside undeclared root directories, or unsupported content inside a declared overlay directory, cause the split generation to fail so Polymer's original main pack remains the fallback.
+Safe files outside resource namespaces are preserved at their original paths in the primary pack only: `minecraft` when present, otherwise the lexicographically first namespace. This includes ordinary root files, direct children such as `assets/icon.png`, auxiliary directories such as `licenses/`, and undeclared overlay directories. Safe non-resource files inside declared overlays also belong to the primary pack. Undeclared overlays remain undeclared; the splitter never infers version ranges or merges their resources into base assets. A source without any resource namespace still fails generation.
+
+Every split pack retains the original `pack.mcmeta` and, when `copyPackIcon` is enabled, `pack.png`. Unsafe paths still fail generation; empty names are omitted with a warning.
 
 `pack.mcmeta` and `pack.png` located inside an overlay directory are omitted because Minecraft ignores those files inside overlays.
 
@@ -315,9 +316,12 @@ Output compatibility is intentionally separate from the JSON schema version:
 algorithmVersion
 copyPackIcon
 deterministicZip
+minSplitPackSizeMb
 ```
 
 `logPackSizes` is diagnostic only and does not affect output compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
+
+Configuration and cache-index writes create same-directory temporary JSON files with explicit POSIX mode `0644` before atomic replacement. This prevents the default restrictive temporary-file permissions from making root-generated JSON unreadable to an administrator's SFTP account. Non-POSIX filesystems retain their normal temporary-file behavior. Configuration loading adds a missing `minSplitPackSizeMb` field with default `30`, preserving other JSON fields through an atomic save. Cache reads remain non-mutating. Older `0600` files otherwise require an explicit permission adjustment or a later write. This permission policy applies only to non-secret settings/cache JSON, not arbitrary files or credentials.
 
 ### Namespace fingerprint
 
@@ -326,10 +330,16 @@ The SHA-256 fingerprint includes:
 - a fingerprint schema/version salt,
 - `pack.mcmeta` path and bytes,
 - optional `pack.png` path and bytes,
-- every shared root-level file path and bytes,
+- primary-only auxiliary file paths and bytes, only for the primary namespace,
 - every selected base or overlay namespace entry path and bytes.
 
-A shared metadata change therefore invalidates all namespace fingerprints.
+A shared metadata change therefore invalidates all namespace fingerprints. Auxiliary-file changes invalidate only the primary namespace fingerprint. Output algorithm version 3 and fingerprint schema v4 prevent reuse of output from before size-based merging.
+
+### Minimum separate-pack size
+
+`minSplitPackSizeMb` defaults to 30 MiB; zero disables merging and negative values are invalid. Non-primary namespaces are evaluated before the primary namespace. Each candidate's final compressed ZIP size, including metadata/icon, is compared with the threshold. Candidates at or below the threshold contribute their original ZIP entries to the primary namespace and are omitted from the active pack map. A newly written small candidate is deleted as a temporary file without committing a hosted blob. Larger candidates retain their namespace UUIDs and normal hosted publication. The primary pack is written last with sorted merged entries and its resulting fingerprint; it is never merged away. Existing issued URLs/blobs are retained under the normal lifecycle policy.
+
+Merged namespaces cannot be selected independently by the send command and are absent from namespace suggestions. Their content remains in the primary pack, including declared overlay paths. Changes to merged resources invalidate the primary fingerprint. Whole-source reuse still requires the exact output compatibility key, including the threshold. Changed-source builds may compress merged candidates again to determine their exact size.
 
 ### Whole-source unchanged fast path
 
@@ -478,7 +488,8 @@ For legacy 1.21.x, Polymer's provider has its own generation-ready state. The sp
   "splitMode": "namespace",
   "copyPackIcon": true,
   "deterministicZip": true,
-  "logPackSizes": true
+  "logPackSizes": true,
+  "minSplitPackSizeMb": 30
 }
 ```
 
@@ -505,6 +516,8 @@ Administrator commands:
 The `send` command is a delivery operation only. It requires an active `READY` `SplitGeneration` and a Phase 13-supported local AutoHost provider.
 
 `targets` is Minecraft's standard player selector argument, so one player or multiple players can be selected through vanilla selectors. `all` selects every pack from the current generation in its deterministic order; `namespace <name>` selects exactly one current namespace.
+
+Namespace suggestions read one coordinator snapshot per request and expose only the current `READY` generation's namespaces, sorted and filtered by Minecraft's suggestion helper. Failed or incomplete generations provide no namespace suggestions. Shared command feedback uses colored components across all supported versions; status colors distinguish ready, generating, failed, and not-started states.
 
 The version-specific AutoHost bridge:
 
@@ -561,6 +574,8 @@ The command tree is shared. `versions/commands-legacy/CommandPermissions` uses t
 
 The Mixin classes remain version-specific only because `AbstractProvider#getProperties(...)` receives a legacy `Connection` or modern Fabric `PacketContext`. Each Mixin delegates to shared `MainPackSuppression`, which performs the READY/provider gate and removes only the original Polymer main pack by main UUID plus default AutoHost path. Do not move general integration logic into Mixins.
 
+`MainPackSuppression` lives in `org.karn.polymersplitter.polymer`, outside the configured `org.karn.polymersplitter.mixin` package. Reserve the configured Mixin package and its subpackages for Mixins: ordinary helper classes there cannot be loaded directly and cause `IllegalClassLoadError` when an injected method calls them.
+
 ### Polymer internal API boundary
 
 The audited internal-API inventory and upgrade checklist live in [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md).
@@ -585,7 +600,8 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - Interrupted temporary files are cleaned on startup on a best-effort basis.
 - Invalid legacy TSV/generation data is not partially migrated.
 - Invalid `pack.mcmeta` overlay metadata: split generation fails.
-- Unsupported root/overlay directory content: split generation fails.
+- Safe non-namespace content: preserve it only in the primary pack at its original path. Unsafe paths or malformed namespace paths still fail generation.
+- ZIP entries with empty names: omit them from split packs and log their count and total uncompressed size; leave the source ZIP unchanged. Their content cannot be restored without a valid producer-supplied path. Other unsafe entry paths still fail split generation.
 - Empty namespace set: split generation fails.
 - Namespace ZIP failure: whole new generation is not published.
 - AutoHost registration failure: the candidate generation is not published.
@@ -603,9 +619,9 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 
 Many Polymer mods contribute resources to `assets/minecraft`. As a result, `minecraft.zip` can remain large even when other namespaces split efficiently.
 
-### Conservative handling of unknown pack directories
+### Auxiliary files and undeclared overlays
 
-Declared resource-pack overlays are preserved and routed by namespace, and ordinary root-level files are copied to every split pack. Unknown root directories or unsupported files inside an overlay are intentionally rejected instead of guessed. This can cause a valid-but-unrecognized future pack layout to fall back to Polymer's original main pack until explicit support is added.
+Declared resource-pack overlays are preserved and routed by namespace. Safe files outside resource namespaces are stored only in the primary pack, including undeclared overlay directories. Their paths and bytes are retained, but no missing overlay declaration is reconstructed. Auxiliary-file changes require the primary pack to be downloaded again. A manual push of only a non-primary namespace does not include these auxiliary files; use `send ... all` to include the primary pack.
 
 ### Namespace and hosted-entry retirement
 

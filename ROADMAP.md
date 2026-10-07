@@ -55,10 +55,10 @@ Make namespace splitting preserve the semantics of modern resource packs, not on
 
 - Reads declared overlay directories from `pack.mcmeta` without rewriting version-range metadata.
 - Routes base and overlay `assets/<namespace>/...` entries into the same namespace pack.
-- Copies ordinary root-level files into every namespace pack.
+- Preserves safe non-namespace files only in the primary pack, including root files, direct `assets/` files, and auxiliary directories.
 - Omits overlay-local `pack.mcmeta` and `pack.png`, which Minecraft ignores.
-- Rejects undeclared/unknown root directories and unsupported overlay content so the normal Polymer main pack remains the fallback.
-- Includes overlay/shared-root content in namespace fingerprints and bumps the fingerprint schema to invalidate incompatible old cache entries.
+- Preserves undeclared overlay directories in the primary pack without inferring declarations or applying their resources to base assets; rejects unsafe paths and malformed namespace paths.
+- Includes declared overlay content in each namespace fingerprint and auxiliary/merged content only in the primary fingerprint; current output algorithm version 3 and fingerprint schema v4 invalidate prior output caches.
 
 ## Phase 11 — Atomic/versioned AutoHost hosting
 
@@ -229,22 +229,16 @@ A secondary split strategy is implemented only if its dependency rules are expli
 
 Avoid generating excessive numbers of tiny resource packs.
 
-### Scope
+### Implemented baseline
 
-- Define a configurable grouping threshold.
-- Combine small namespaces into deterministic group packs.
-- Keep large namespaces independent.
-- Preserve stable group identity when membership is unchanged.
-- Define cache invalidation when group membership changes.
+- `minSplitPackSizeMb` defaults to 30 MiB; `0` disables merging.
+- Merge non-primary namespaces whose final compressed ZIP size is at or below the threshold into the existing primary pack, preserving resource paths and overlay declarations.
+- Keep larger namespaces independent and retain stable primary/namespace identities.
+- Include merged content in the primary fingerprint and the threshold in output compatibility.
 
-Possible output:
+### Optional follow-up
 
-```text
-minecraft.zip
-polyfactory.zip
-large_mod.zip
-small-namespaces.zip
-```
+Dedicated group packs may be considered if measurements justify their extra identity and delivery complexity. The current implementation uses the primary pack rather than a separate `small-namespaces.zip`.
 
 ## Phase 17 — Performance optimization
 

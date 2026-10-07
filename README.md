@@ -4,6 +4,8 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
+Safe files outside resource namespaces are preserved only in the primary pack (`minecraft` when present, otherwise the first namespace alphabetically). This includes `assets/icon.png`, license directories, and undeclared overlays; their original paths are retained without inventing overlay declarations. Each pack still includes `pack.mcmeta` and the configured pack icon. Entries with empty names are omitted with a warning.
+
 **Status:** pre-0.1.0 development; Phase 10-14 stability baseline complete  
 **Client mod:** not required
 
@@ -50,6 +52,8 @@ Administrator commands:
 
 `<targets>` uses Minecraft's normal player selector argument, so selectors such as `@a`, `@p`, `@r`, and filtered selectors work.
 
+The namespace argument offers tab completion from the current `READY` generation, including partial-name matching. Command feedback uses a cyan prefix, gray labels, highlighted values, and green/yellow/red status colors.
+
 Examples:
 
 ```text
@@ -64,17 +68,24 @@ The send command re-pushes the current `READY` split generation; it does not reb
 
 The configuration file is created at `config/polymersplitter.json`.
 
+A missing file is created with the defaults below. Missing settings use defaults in memory; startup adds `minSplitPackSizeMb` if absent while preserving existing fields. An empty or whitespace-only file is invalid and prevents initialization. Configuration changes take effect after restarting the server.
+
+On POSIX filesystems, newly saved configuration and cache-index JSON files use mode `0644` so an administrator using a different SFTP account can read them. Existing files are rewritten on load only when adding the missing size option; older files saved with mode `0600` may otherwise require a one-time read-permission adjustment. These JSON files contain settings and cache metadata, not credentials.
+
 ```json
 {
   "enabled": true,
   "splitMode": "namespace",
   "copyPackIcon": true,
   "deterministicZip": true,
-  "logPackSizes": true
+  "logPackSizes": true,
+  "minSplitPackSizeMb": 30
 }
 ```
 
 Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon` or `deterministicZip` invalidates cache reuse rather than reusing ZIPs produced under different settings.
+
+`minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
 
 ## Build
 

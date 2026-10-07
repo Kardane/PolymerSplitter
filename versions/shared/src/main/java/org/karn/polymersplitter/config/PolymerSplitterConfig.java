@@ -2,6 +2,7 @@ package org.karn.polymersplitter.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import org.karn.polymersplitter.common.io.AtomicFiles;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 
@@ -22,6 +23,7 @@ public final class PolymerSplitterConfig {
     private boolean copyPackIcon = true;
     private boolean deterministicZip = true;
     private boolean logPackSizes = true;
+    private int minSplitPackSizeMb = 30;
 
     public static PolymerSplitterConfig load(Path path) throws IOException {
         Objects.requireNonNull(path, "path");
@@ -34,8 +36,10 @@ public final class PolymerSplitterConfig {
         }
 
         PolymerSplitterConfig config;
+        JsonObject stored;
         try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            config = GSON.fromJson(reader, PolymerSplitterConfig.class);
+            stored = GSON.fromJson(reader, JsonObject.class);
+            config = GSON.fromJson(stored, PolymerSplitterConfig.class);
         }
 
         if (config == null) {
@@ -43,20 +47,28 @@ public final class PolymerSplitterConfig {
         }
 
         config.validate();
+        if (!stored.has("minSplitPackSizeMb")) {
+            stored.addProperty("minSplitPackSizeMb", config.minSplitPackSizeMb);
+            saveJson(path, GSON.toJson(stored));
+        }
         return config;
     }
 
     public void save(Path path) throws IOException {
+        saveJson(path, GSON.toJson(this));
+    }
+
+    private static void saveJson(Path path, String json) throws IOException {
         Path parent = path.toAbsolutePath().normalize().getParent();
         if (parent == null) {
             throw new IOException("Config path has no parent: " + path);
         }
 
         Files.createDirectories(parent);
-        Path temp = Files.createTempFile(parent, ".polymersplitter-", ".json.tmp");
+        Path temp = AtomicFiles.createReadableJsonTemp(parent, ".polymersplitter-");
 
         try {
-            Files.writeString(temp, GSON.toJson(this) + System.lineSeparator(), StandardCharsets.UTF_8);
+            Files.writeString(temp, json + System.lineSeparator(), StandardCharsets.UTF_8);
             AtomicFiles.replace(temp, path);
         } finally {
             Files.deleteIfExists(temp);
@@ -67,7 +79,8 @@ public final class PolymerSplitterConfig {
         return new SplitterConfig(
                 copyPackIcon,
                 deterministicZip,
-                logPackSizes
+                logPackSizes,
+                minSplitPackSizeMb
         );
     }
 
@@ -84,6 +97,9 @@ public final class PolymerSplitterConfig {
     }
 
     private void validate() {
+        if (minSplitPackSizeMb < 0) {
+            throw new IllegalArgumentException("minSplitPackSizeMb must be non-negative");
+        }
         if (!"namespace".equals(splitMode)) {
             throw new IllegalArgumentException(
                     "Unsupported splitMode '" + splitMode + "'. Only 'namespace' is currently supported."

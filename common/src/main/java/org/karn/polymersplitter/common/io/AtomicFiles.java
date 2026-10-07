@@ -5,9 +5,25 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
 
 public final class AtomicFiles {
+    public static Path createReadableJsonTemp(Path directory, String prefix) throws IOException {
+        Path temp = Files.createTempFile(directory, prefix, ".json.tmp");
+        try {
+            PosixFileAttributeView permissions = Files.getFileAttributeView(temp, PosixFileAttributeView.class);
+            if (permissions != null) {
+                permissions.setPermissions(PosixFilePermissions.fromString("rw-r--r--"));
+            }
+            return temp;
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(temp);
+            throw e;
+        }
+    }
+
     private AtomicFiles() {
     }
 

@@ -3,13 +3,17 @@ package org.karn.polymersplitter.common.pack;
 public record OutputCompatibility(
         int algorithmVersion,
         boolean copyPackIcon,
-        boolean deterministicZip
+        boolean deterministicZip,
+        int minSplitPackSizeMb
 ) {
-    public static final int CURRENT_ALGORITHM_VERSION = 1;
+    public static final int CURRENT_ALGORITHM_VERSION = 3;
 
     public OutputCompatibility {
         if (algorithmVersion <= 0) {
             throw new IllegalArgumentException("algorithmVersion must be positive");
+        }
+        if (minSplitPackSizeMb < 0) {
+            throw new IllegalArgumentException("minSplitPackSizeMb must be non-negative");
         }
     }
 
@@ -17,7 +21,8 @@ public record OutputCompatibility(
         return new OutputCompatibility(
                 CURRENT_ALGORITHM_VERSION,
                 config.copyPackIcon(),
-                config.deterministicZip()
+                config.deterministicZip(),
+                config.minSplitPackSizeMb()
         );
     }
 }

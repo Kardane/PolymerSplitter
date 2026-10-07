@@ -1,4 +1,4 @@
-package org.karn.polymersplitter.mixin;
+package org.karn.polymersplitter.polymer;
 
 import eu.pb4.polymer.autohost.api.AutoHostUtils;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
