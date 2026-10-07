@@ -32,6 +32,8 @@ The design optimizes for one outcome: when only one namespace changes, clients s
 
 ```text
 common/
+  hosting/
+    HostingStatus
   lifecycle/
     SplitCoordinator
     SplitRegistry
@@ -152,7 +154,7 @@ GENERATING
     +--> failure --> FAILED
 ```
 
-At startup, PolymerSplitter first removes owned temporary files, validates `current-cache.tsv`, verifies every cached split ZIP, rebuilds/validates immutable hosted blobs, registers their content-addressed AutoHost IDs, and only then publishes the recovered registry as `READY`. If cache recovery fails, the registry remains unpublished and Polymer's main pack remains the fallback.
+At server start, after Polymer AutoHost has loaded its actual configuration/provider, PolymerSplitter classifies the provider. Startup cache restore runs only for explicitly supported local providers. It then removes owned temporary files, validates `current-cache.tsv`, verifies every cached split ZIP, rebuilds/validates immutable hosted blobs, registers their content-addressed AutoHost IDs, and only then publishes the recovered registry as `READY`. If cache recovery fails, the registry remains unpublished and Polymer's main pack remains the fallback.
 
 A newly generated resource-pack generation is published in this order:
 
@@ -352,11 +354,29 @@ This preserves Polymer's configured hosting mode, prompt, required-pack behavior
 
 The mod does not send resource-pack packets directly.
 
-### Supported hosting expectation
+### Hosting compatibility gate
 
-Polymer's local hosting modes such as same-port/Netty and standalone HTTP can resolve files registered by PolymerSplitter.
+Split delivery is enabled only for Polymer's built-in local providers:
 
-Polymer's `external` provider only constructs external URLs. PolymerSplitter does not upload generated split ZIPs to an external service, so operators using that provider must arrange for those files to be served externally.
+- `polymer:automatic`
+- `polymer:auto`
+- `polymer:netty`
+- `polymer:same_port`
+- `polymer:http_server`
+- `polymer:standalone`
+
+The following configurations are intentionally unsupported for split delivery:
+
+- AutoHost disabled,
+- `polymer:external`,
+- `polymer:empty`,
+- unknown/custom provider types.
+
+The `external` provider only constructs URLs; PolymerSplitter has no upload mechanism for externally hosted split ZIPs. Unknown/custom providers are rejected conservatively because the AutoHost API does not guarantee that an arbitrary provider serves files registered through `registerHostedFile(...)`.
+
+The compatibility gate is evaluated when publishing split packs, collecting resource packs, suppressing Polymer's main pack, and reporting command status. If configuration becomes unsupported, PolymerSplitter stops advertising split packs and stops suppressing the original main pack.
+
+Provider-specific readiness remains owned by Polymer AutoHost. PolymerSplitter does not duplicate AutoHost's per-connection readiness checks.
 
 ## 12. Main-pack replacement
 
@@ -452,6 +472,7 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - Empty namespace set: split generation fails.
 - Namespace ZIP failure: whole new generation is not published.
 - AutoHost registration failure: whole new registry is not published.
+- Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
 - Cache metadata failure: log/cache degradation only; valid packs remain usable.
 - Old generation cleanup failure: ignored for delivery purposes.
 - Polymer reports output issues on modern versions: split generation is marked failed.

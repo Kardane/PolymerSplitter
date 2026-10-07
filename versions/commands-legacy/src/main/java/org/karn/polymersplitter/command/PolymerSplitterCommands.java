@@ -6,6 +6,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import org.karn.polymersplitter.PolymerSplitter;
 import org.karn.polymersplitter.common.pack.SplitPack;
+import org.karn.polymersplitter.polymer.PolymerAutoHostBridge;
 import org.karn.polymersplitter.polymer.PolymerGenerationHook;
 
 import java.util.Comparator;
@@ -35,6 +36,19 @@ public final class PolymerSplitterCommands {
                         + " | packs=" + packs.size()
                         + " | total=" + formatBytes(totalSize(packs))
         ), false);
+
+        var hosting = PolymerAutoHostBridge.currentHostingStatus();
+        source.sendSuccess(() -> Component.literal(
+                "AutoHost: " + hosting.kind()
+                        + " | provider=" + hosting.providerType()
+                        + " | supported=" + hosting.supported()
+        ), false);
+
+        if (!hosting.supported()) {
+            source.sendSuccess(() -> Component.literal(
+                    "AutoHost reason: " + hosting.message()
+            ), false);
+        }
 
         if (coordinator.sourceHash() != null) {
             source.sendSuccess(() -> Component.literal(
@@ -77,6 +91,15 @@ public final class PolymerSplitterCommands {
         if (!PolymerSplitter.isEnabled()) {
             source.sendFailure(Component.literal(
                     "PolymerSplitter is disabled in config/polymersplitter.json"
+            ));
+            return 0;
+        }
+
+        var hosting = PolymerAutoHostBridge.currentHostingStatus();
+        if (!hosting.supported()) {
+            source.sendFailure(Component.literal(
+                    "Split delivery is unavailable: " + hosting.message()
+                            + " (provider=" + hosting.providerType() + ")"
             ));
             return 0;
         }

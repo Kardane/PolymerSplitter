@@ -133,6 +133,8 @@ Make a valid previous split generation recoverable across server restarts and in
 
 ## Phase 13 — AutoHost configuration hardening
 
+**Status:** completed
+
 Make behavior explicit across Polymer AutoHost provider configurations.
 
 ### Scope
@@ -153,6 +155,18 @@ Make behavior explicit across Polymer AutoHost provider configurations.
 - Unsupported or incomplete hosting configurations fail clearly.
 - Locally hosted modes continue to use Polymer AutoHost only.
 - External-provider limitations are visible to operators.
+
+### Implemented
+
+- Detects the actual AutoHost configuration after server startup rather than relying on pre-start defaults.
+- Explicitly supports built-in local providers: automatic/auto, Netty/same-port, and standalone/http-server.
+- Blocks split delivery for disabled AutoHost, external, empty, and unknown/custom providers.
+- Dynamic compatibility gating prevents split collection and main-pack suppression if provider configuration is unsupported.
+- Split publication is skipped before compression/publication work when the active provider is unsupported.
+- Startup cache restore runs only when the resolved AutoHost provider can serve registered split files.
+- `/polymersplitter status` reports provider type, compatibility class, and support state.
+- `/polymersplitter rebuild` refuses a split rebuild when the current hosting provider is unsupported.
+- Operators using `polymer:external` receive a clear warning that PolymerSplitter does not upload generated split ZIPs.
 
 ## Phase 14 — Namespace lifecycle cleanup
 

@@ -1,8 +1,10 @@
 package org.karn.polymersplitter;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import org.karn.polymersplitter.command.PolymerSplitterCommands;
+import org.karn.polymersplitter.common.hosting.HostingStatus;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 import org.karn.polymersplitter.common.lifecycle.SplitRegistry;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
@@ -51,13 +53,32 @@ public final class PolymerSplitter implements ModInitializer {
         PolymerAutoHostBridge.registerPackCollector(coordinator);
         PolymerGenerationHook.register(coordinator);
 
-        recoverStartupState();
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> inspectHostingAndRecover());
 
         LOGGER.log(System.Logger.Level.INFO,
                 "PolymerSplitter initialized with splitMode=" + config.splitMode());
     }
 
-    private static void recoverStartupState() {
+    private static void inspectHostingAndRecover() {
+        HostingStatus hosting = PolymerAutoHostBridge.currentHostingStatus();
+
+        if (hosting.supported()) {
+            LOGGER.log(System.Logger.Level.INFO,
+                    "Polymer AutoHost provider supported: " + hosting.providerType());
+        } else {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "PolymerSplitter split delivery disabled for AutoHost provider '"
+                            + hosting.providerType() + "': " + hosting.message());
+        }
+
+        if (coordinator.state() != SplitState.NOT_STARTED) {
+            return;
+        }
+
+        recoverStartupState(hosting);
+    }
+
+    private static void recoverStartupState(HostingStatus hosting) {
         try {
             int deletedTemps = SplitRecovery.cleanupTemporaryFiles(coordinator.outputRoot());
             if (deletedTemps > 0) {
@@ -71,24 +92,26 @@ public final class PolymerSplitter implements ModInitializer {
 
         String restoredHash = null;
 
-        try {
-            var restored = coordinator.restore(
-                    packs -> PolymerAutoHostBridge.registerHostedPacks(
-                            coordinator.outputRoot(),
-                            packs
-                    )
-            );
+        if (hosting.supported()) {
+            try {
+                var restored = coordinator.restore(
+                        packs -> PolymerAutoHostBridge.registerHostedPacks(
+                                coordinator.outputRoot(),
+                                packs
+                        )
+                );
 
-            if (restored.isPresent()) {
-                restoredHash = coordinator.sourceHash();
-                LOGGER.log(System.Logger.Level.INFO,
-                        "Restored cached split generation: packs=" + restored.get().size()
-                                + ", sourceSha1=" + restoredHash);
+                if (restored.isPresent()) {
+                    restoredHash = coordinator.sourceHash();
+                    LOGGER.log(System.Logger.Level.INFO,
+                            "Restored cached split generation: packs=" + restored.get().size()
+                                    + ", sourceSha1=" + restoredHash);
+                }
+            } catch (IOException | RuntimeException e) {
+                LOGGER.log(System.Logger.Level.WARNING,
+                        "Cached split generation could not be restored; Polymer main pack remains the fallback",
+                        e);
             }
-        } catch (IOException | RuntimeException e) {
-            LOGGER.log(System.Logger.Level.WARNING,
-                    "Cached split generation could not be restored; Polymer main pack remains the fallback",
-                    e);
         }
 
         try {
@@ -117,7 +140,8 @@ public final class PolymerSplitter implements ModInitializer {
                 && coordinator != null
                 && coordinator.state() == SplitState.READY
                 && registry != null
-                && !registry.isEmpty();
+                && !registry.isEmpty()
+                && PolymerAutoHostBridge.currentHostingStatus().supported();
     }
 
     public static SplitCoordinator coordinator() {

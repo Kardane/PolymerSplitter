@@ -22,6 +22,7 @@ Preserve these invariants:
 - Preserve declared resource-pack overlays by routing each overlay's `assets/<namespace>/` content into the matching namespace pack.
 - Preserve ordinary root-level files in every split pack; fail safely instead of guessing unknown root-directory semantics.
 - Do not implement a separate HTTP server; hosting and delivery belong to Polymer AutoHost.
+- Enable split delivery only for explicitly supported built-in local AutoHost providers; external, empty, disabled, or unknown/custom providers must not cause main-pack suppression or split URL advertisement.
 - Vanilla clients must not require PolymerSplitter or another client mod.
 - Keep namespace pack UUIDs stable across content changes.
 - Use Polymer's main resource-pack UUID for the primary split pack (`minecraft` when present).
@@ -47,7 +48,7 @@ Before changing a Polymer integration point, inspect the matching upstream Polym
 
 ## Repository map
 
-- `common/src/main/java`: Minecraft/Polymer-independent splitting, identity, cache, manifest, and lifecycle logic.
+- `common/src/main/java`: Minecraft/Polymer-independent splitting, identity, cache, hosting status, manifest, and lifecycle logic.
 - `versions/shared`: shared Fabric initializer, config, and resources.
 - `versions/legacy`, `versions/modern`: Polymer generation hooks.
 - `versions/autohost-*`: AutoHost API adapters.

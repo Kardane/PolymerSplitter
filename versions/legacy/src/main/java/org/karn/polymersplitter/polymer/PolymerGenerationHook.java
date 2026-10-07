@@ -43,6 +43,15 @@ public final class PolymerGenerationHook {
     }
 
     private static void split(SplitCoordinator coordinator, Path generatedPack) {
+        var hosting = PolymerAutoHostBridge.currentHostingStatus();
+        if (!hosting.supported()) {
+            coordinator.markFailed(new IllegalStateException(hosting.message()));
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "Skipping split-pack publication for AutoHost provider '"
+                            + hosting.providerType() + "': " + hosting.message());
+            return;
+        }
+
         try {
             List<SplitPack> packs = coordinator.process(
                     generatedPack,

@@ -4,7 +4,7 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
-**Status:** Phase 12 startup recovery and cache validation implemented  
+**Status:** Phase 13 AutoHost configuration hardening implemented  
 **Client mod:** not required
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design and version boundaries.  
@@ -20,6 +20,21 @@ See [ROADMAP.md](ROADMAP.md) for the next development phases.
 | 26.1-26.1.2 | 26.1.2 | 0.16.5+26.1.2 |
 | 26.2 | 26.2 | 0.17.5+26.2 |
 | 26.3+ | 26.3 | 0.18.2+26.3 |
+
+## AutoHost compatibility
+
+Split delivery is supported with Polymer's built-in local providers:
+
+```text
+polymer:automatic
+polymer:auto
+polymer:netty
+polymer:same_port
+polymer:http_server
+polymer:standalone
+```
+
+AutoHost disabled, `polymer:external`, `polymer:empty`, and unknown/custom providers do not enable split delivery. The original Polymer delivery path is left unsuppressed. PolymerSplitter does not upload split ZIPs to external hosting.
 
 ## Commands
 

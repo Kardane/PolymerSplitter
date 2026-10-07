@@ -2,9 +2,11 @@ package org.karn.polymersplitter.polymer;
 
 import eu.pb4.polymer.autohost.api.AutoHostUtils;
 import eu.pb4.polymer.autohost.api.ResourcePackDataProvider;
+import eu.pb4.polymer.autohost.impl.AutoHost;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
 import xyz.nucleoid.packettweaker.PacketContext;
 import net.minecraft.resources.Identifier;
+import org.karn.polymersplitter.common.hosting.HostingStatus;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
 import org.karn.polymersplitter.common.pack.HostedPackStore;
@@ -24,9 +26,66 @@ public final class PolymerAutoHostBridge {
     private PolymerAutoHostBridge() {
     }
 
+    public static HostingStatus currentHostingStatus() {
+        if (AutoHost.config == null) {
+            return new HostingStatus(
+                    HostingStatus.Kind.UNKNOWN,
+                    "<uninitialized>",
+                    false,
+                    "Polymer AutoHost configuration is not initialized"
+            );
+        }
+
+        String providerType = AutoHost.config.type == null
+                ? "<unset>"
+                : AutoHost.config.type.trim();
+
+        if (!AutoHost.config.enabled) {
+            return new HostingStatus(
+                    HostingStatus.Kind.DISABLED,
+                    providerType,
+                    false,
+                    "Polymer AutoHost is disabled"
+            );
+        }
+
+        return switch (providerType) {
+            case "polymer:automatic",
+                 "polymer:auto",
+                 "polymer:netty",
+                 "polymer:same_port",
+                 "polymer:http_server",
+                 "polymer:standalone" -> new HostingStatus(
+                    HostingStatus.Kind.LOCAL,
+                    providerType,
+                    true,
+                    "Polymer AutoHost can serve registered split files"
+            );
+            case "polymer:external" -> new HostingStatus(
+                    HostingStatus.Kind.EXTERNAL,
+                    providerType,
+                    false,
+                    "Polymer AutoHost external provider only constructs URLs; PolymerSplitter does not upload split ZIPs"
+            );
+            case "polymer:empty" -> new HostingStatus(
+                    HostingStatus.Kind.EMPTY,
+                    providerType,
+                    false,
+                    "Polymer AutoHost empty provider does not host resource packs"
+            );
+            default -> new HostingStatus(
+                    HostingStatus.Kind.UNKNOWN,
+                    providerType,
+                    false,
+                    "AutoHost provider is not explicitly supported by PolymerSplitter"
+            );
+        };
+    }
+
     public static void registerPackCollector(SplitCoordinator coordinator) {
         AutoHostUtils.SEND_RESOURCE_PACK_COLLECTOR.register((provider, context, consumer) -> {
-            if (coordinator.state() != SplitState.READY) {
+            if (coordinator.state() != SplitState.READY
+                    || !currentHostingStatus().supported()) {
                 return;
             }
 
@@ -53,6 +112,14 @@ public final class PolymerAutoHostBridge {
             Path outputRoot,
             List<SplitPack> packs
     ) {
+        HostingStatus hosting = currentHostingStatus();
+        if (!hosting.supported()) {
+            throw new IllegalStateException(
+                    "Split-pack hosting is unavailable: " + hosting.message()
+                            + " (provider=" + hosting.providerType() + ")"
+            );
+        }
+
         final Map<String, Path> hostedFiles;
 
         try {
