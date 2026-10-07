@@ -7,6 +7,8 @@ PolymerSplitter splits Polymer-generated resource packs into independently cache
 **Status:** Phase 9 multi-version support implemented  
 **Client mod:** not required
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design and version boundaries.
+
 ## Supported versions
 
 | Minecraft | Build target | Polymer |
