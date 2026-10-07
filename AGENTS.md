@@ -1,69 +1,66 @@
 # AGENTS.md
 
-Repository-level instructions for coding agents. Keep this file small; use it as a map to the durable documentation instead of duplicating design detail.
+Repository instructions for coding agents. Keep this document concise; treat it as an operational map to the durable documentation rather than duplicating design specifications.
 
-## Start here
+---
 
-Read the minimum relevant context before editing:
+## 1. Documentation Map
 
-1. [README.md](README.md) — user-facing behavior, commands, supported versions.
-2. [ARCHITECTURE.md](ARCHITECTURE.md) — runtime flow, invariants, failure semantics, version boundaries.
-3. [ROADMAP.md](ROADMAP.md) — planned work and completed phase boundaries.
-4. [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md) — audited public/internal Polymer API boundary.
-5. The affected `versions/mc-*/build.gradle` — exact Minecraft, Fabric, Polymer, Java, and adapter selection.
+Read the minimal relevant context before making changes:
 
-Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, hosting, delivery, compatibility, or failure behavior changes. Keep README user-facing.
+1. [README.md](README.md) - User-facing behavior, commands, and supported versions.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime flow, invariants, storage/cache model, and version boundaries.
+3. [ROADMAP.md](ROADMAP.md) - Planned work and completed phase boundaries.
+4. [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md) - Audited public and internal Polymer API boundaries.
+5. `versions/mc-*/build.gradle` - Target-specific Minecraft, Fabric, Polymer, Java, and adapter dependencies.
 
-## Hard invariants
+*Rule:* Update [ARCHITECTURE.md](ARCHITECTURE.md) in the same change whenever lifecycle, caching, identity, hosting, delivery, compatibility, or failure behavior changes. Keep [README.md](README.md) user-facing.
 
-- This is a server-only Fabric companion for [Polymer](https://github.com/Patbox/polymer); vanilla clients need no PolymerSplitter mod.
-- Split the final Polymer pack by resource namespace and preserve declared overlays/root metadata according to `ARCHITECTURE.md`. The only current intra-`minecraft` secondary split is `minecraft.sounds` for OGG payloads; do not broaden it by file type without explicit pack-stack safety rules.
-- Hosting belongs to Polymer AutoHost. Do not add a separate HTTP server.
-- Split delivery is enabled only for explicitly supported built-in local AutoHost providers.
-- Preserve Polymer's required/prompt policy when automatically or manually pushing packs.
-- Keep pack identities stable. The primary `minecraft` pack uses Polymer's main UUID; non-primary namespace packs and synthetic physical packs such as `minecraft.sounds` use deterministic UUIDs derived from their pack key.
-- Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs. For newly written namespace ZIPs, hash the emitted ZIP bytes in-stream; do not add a second full-file SHA-1 pass unless verifying an already-existing blob.
-- Never remap an already issued content-addressed URL to different bytes.
-- Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
-- `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.
-- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip` + `minSplitPackSizeMb` + `compressionLevel` + normalized namespace include/exclude policy. Diagnostic/retention settings are not output compatibility.
-- Namespace include/exclude policy must never drop resources: policy-excluded non-primary candidates are merged into the primary pack; exclude takes precedence over include. Synthetic physical packs are matched by both their pack key and source namespace, e.g. `minecraft.sounds` also inherits `minecraft` policy.
-- Hosted-blob retention is enforced only at a safe startup restore point. Runtime rebuilds must never garbage-collect historical content-addressed blobs.
-- Config reload may update the coordinator's immutable split config for future generations, but must not invalidate the currently published READY generation. `enabled` remains startup-scoped unless lifecycle hook registration is explicitly redesigned.
-- Whole-source fast reuse is allowed only when source SHA-1 matches a compatible, fully verified index. It may skip splitting/fingerprinting/index rewrite, but must still complete hosted registration before publishing READY.
-- Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Incompatible or metadata-free old caches are cache misses, not current output. Mutation belongs only to generation, legacy blob import, or explicit cleanup.
-- For changed-source publication, publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed. Whole-source fast reuse may skip the rewrite only when the existing compatible index and every referenced blob have already verified.
-- Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
-- Keep historical hosted blobs/URLs valid while a server is running. Garbage-collect unreferenced blobs only after a successful startup restore or another explicitly safe lifecycle point.
-- Prefer public Polymer APIs. Direct `.impl` access is allowed only in the compatibility shims and the documented main-pack suppression Mixins listed in `POLYMER_COMPATIBILITY.md`.
-- Do not put Minecraft or Polymer types in `common`.
+---
 
-## Version boundaries
+## 2. Hard Invariants
 
-| Target | Java | Generation | AutoHost adapter | Commands |
-| --- | ---: | --- | --- | --- |
-| 1.21.8 | 21 | legacy events | PacketTweaker + `ResourceLocation` ID | legacy permission |
-| 1.21.9-1.21.10 | 21 | legacy events | PacketTweaker + `ResourceLocation` ID | legacy permission |
-| 1.21.11 | 21 | legacy events | PacketTweaker + `Identifier` ID | modern permission |
-| 26.1-26.3 | 25 | modern events | Fabric `PacketContext` + `Identifier` ID | modern permission |
+- **Server-Only:** Companion mod for Polymer on Fabric. Vanilla clients need no mod.
+- **AutoHost Delegation:** Hosting and delivery belong strictly to Polymer AutoHost. Do not introduce a custom HTTP server. Split delivery is enabled only for supported local providers.
+- **Granularity:** Split by resource namespace only. The sole secondary split is `minecraft.sounds` for OGG audio; do not broaden splitting by file type without explicit pack-stack safety rules.
+- **Stable Identity:** The primary pack (`minecraft` or first alphabetically) uses Polymer's main UUID (`PolymerResourcePackUtils.getMainUuid()`). Non-primary packs and `minecraft.sounds` use deterministic UUIDs derived from their pack key.
+- **In-Stream Hashing:** Newly written namespace ZIPs compute SHA-1 in-stream while emitting bytes. Do not add a second full-file hashing pass.
+- **Immutable Content Routing:** Never remap an already issued content-addressed URL to different bytes.
+- **Atomic Runtime State:** One `CoordinatorSnapshot` (state, active generation, failure, namespace transitions) represents the atomic runtime state. `SplitRegistry` is a read-only view.
+- **Single Canonical Store:** `hosted/<sha1>.zip` is the only persistent split-ZIP store. Never reintroduce generation-directory copies.
+- **Output-Compatibility Gate:** Cache reuse requires an exact match on: algorithm version + `copyPackIcon` + `deterministicZip` + `minSplitPackSizeMb` + `compressionLevel` + normalized namespace policy.
+- **Merge-Only Policy:** Policy filters never discard resources. Undersized or excluded non-primary packs merge into the primary pack (exclude wins).
+- **Safe Blob Retention:** Historical blobs remain valid while the server is running. Garbage collection runs only at a safe startup restore point.
+- **Graceful Fallback:** Any generation, cache, or provider error must degrade cleanly to Polymer's original monolithic pack delivery, never partial split delivery.
+- **Decoupled Common:** `common` must never reference Minecraft or Polymer types.
 
-Before changing a Polymer integration point, inspect the matching upstream branch: `dev/1.21.6`, `dev/1.21.9`, `dev/1.21.11`, `dev/26.1`, `dev/26.2`, or `dev/26.3`.
+---
 
-## Repository map
+## 3. Version Boundaries & Repository Map
 
-- `common` — splitter, identity, lifecycle snapshots, cache, immutable hosted blobs, provider-independent records.
-- `versions/shared` — Fabric initializer/config plus shared command, hosting/delivery, publication orchestration, common AutoHost internal shim, and main-pack suppression helper.
-- `versions/legacy`, `versions/modern` — generation-event/path adapters only.
-- `versions/autohost-legacy`, `versions/autohost-modern` — packet-context/readiness/provider adapters only.
-- `versions/pack-id-*` — the `ResourceLocation` / `Identifier` construction boundary.
-- `versions/mixin-*` — only the version-specific `AbstractProvider#getProperties(...)` injection signature; suppression logic is shared.
-- `versions/commands-*` — permission predicate adapters only.
-- `versions/mc-*` — dependency/version wiring only.
-- `gradle/version-module.gradle` — shared version-module assembly.
+| Target | Java | Generation Hook | AutoHost Adapter | Pack ID Adapter | Permissions |
+| --- | ---: | --- | --- | --- | --- |
+| 1.21.8 | 21 | Legacy (Runnable) | PacketTweaker | ResourceLocation | Legacy |
+| 1.21.9-1.21.10 | 21 | Legacy (Runnable) | PacketTweaker | ResourceLocation | Legacy |
+| 1.21.11 | 21 | Legacy (Runnable) | PacketTweaker | Identifier | Modern |
+| 26.1-26.3 | 25 | Modern (Result) | Fabric PacketContext | Identifier | Modern |
 
-## Validation
+### Repository Map
 
-Validation is build-only unless the user explicitly requests otherwise.
+- `common` - Platform-agnostic splitter, identities, snapshots, cache index, immutable blob store.
+- `versions/shared` - Fabric entrypoint/config, delivery orchestration, command tree, AutoHost internal shim, main-pack suppression helper.
+- `versions/legacy`, `versions/modern` - Generation-event hook adapters only.
+- `versions/autohost-legacy`, `versions/autohost-modern` - Networking packet context and readiness adapters only.
+- `versions/pack-id-*` - `ResourceLocation` vs `Identifier` construction boundaries.
+- `versions/mixin-*` - Minimal `AbstractProvider#getProperties(...)` injection signatures for main-pack suppression.
+- `versions/commands-*` - Permission predicate adapters only.
+- `versions/mc-*` - Per-version dependency and build wiring.
+
+---
+
+## 4. Validation Rules
+
+Validation is **build-only** unless explicitly requested otherwise:
 
 ```bash
 ./gradlew build --no-daemon
@@ -75,12 +72,14 @@ Validation is build-only unless the user explicitly requests otherwise.
 ./gradlew :mc-26.3:build --no-daemon
 ```
 
-Do not start Minecraft, launch a server, or add/run unit, gameplay, functional, integration, or runtime tests unless explicitly requested. Cross-version changes must build every affected target.
+*Policy:* Do not launch Minecraft, start a server, or run unit/gameplay/integration tests unless explicitly requested. Cross-version changes must successfully build every affected target.
 
-## Change discipline
+---
 
-- Prefer one common implementation plus the smallest necessary version adapter.
-- Verify upstream Polymer/Fabric APIs before widening compatibility or changing an internal compatibility shim. Delete a shim when upstream exposes a public equivalent.
-- Do not copy decompiled third-party code.
-- Avoid speculative abstractions; add an adapter only for a real API boundary.
-- Keep documentation cross-linked and remove stale rules instead of accumulating exceptions. `ARCHITECTURE.md` is the current implementation source of truth; ROADMAP completed-phase notes must not describe superseded storage/cache behavior as current.
+## 5. Change Discipline
+
+- Prefer one shared implementation plus the minimal necessary version adapter.
+- Inspect upstream Polymer development branches (`dev/1.21.6`, `dev/1.21.9`, `dev/1.21.11`, `dev/26.1`, `dev/26.2`, `dev/26.3`) before changing integration points.
+- Never copy decompiled third-party code.
+- Avoid speculative abstractions; introduce adapters only for proven upstream API boundaries.
+- Delete compatibility shims whenever upstream exposes a public equivalent.

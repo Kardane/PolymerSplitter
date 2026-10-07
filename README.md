@@ -1,79 +1,74 @@
 # PolymerSplitter
 
-Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer).
+[English](README.md) | [한국어](README.ko.md)
 
-PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost. In addition to namespace packs, Minecraft OGG audio under `assets/minecraft/sounds/` is split into a dedicated `minecraft.sounds` pack.
+A server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer) that splits generated resource packs by namespace for independent client caching, delegating hosting and delivery to Polymer AutoHost.
 
-Safe files outside resource namespaces are preserved only in the primary pack (`minecraft` when present, otherwise the first namespace alphabetically). This includes `assets/icon.png`, license directories, and undeclared overlays; their original paths are retained without inventing overlay declarations. Each pack still includes `pack.mcmeta` and the configured pack icon. Entries with empty names are omitted with a warning.
+When resource packs update, clients only re-download modified namespaces instead of the entire monolithic pack.
 
-**Status:** pre-0.1.0 development; Phase 10-14 stability baseline complete  
-**Client mod:** not required
+**Status:** Pre-0.1.0 development (Phase 10-14 stability baseline complete)  
+**Client Mod:** Not required (vanilla-compatible)
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the current runtime, cache/storage model, and version boundaries.  
-See [ROADMAP.md](ROADMAP.md) for planned development after the stability baseline.
+---
 
-## Supported versions
+## Key Features
 
-| Minecraft | Build target | Polymer |
-| --- | --- | --- |
-| 1.21.8 | 1.21.8 | 0.13.13+1.21.8 |
-| 1.21.9-1.21.10 | 1.21.10 | 0.14.4+1.21.10 |
-| 1.21.11 | 1.21.11 | 0.15.2+1.21.11 |
-| 26.1-26.1.2 | 26.1.2 | 0.16.5+26.1.2 |
-| 26.2 | 26.2 | 0.17.5+26.2 |
-| 26.3+ | 26.3 | 0.18.2+26.3 |
+- **Namespace Splitting:** Divides Polymer's final pack into separate per-namespace ZIPs.
+- **Dedicated Audio Pack:** Extracts OGG audio from `assets/minecraft/sounds/` into a standalone `minecraft.sounds` pack (`sounds.json` remains in the primary pack).
+- **Primary Pack Preservation:** Root metadata (`pack.mcmeta`, `pack.png`), licenses, undeclared overlays, and safe non-namespace files are preserved in the primary pack (`minecraft`, or the first alphabetically).
+- **Deterministic & Content-Addressed:** Fixed timestamps (1980-01-01), sorted entry order, and in-stream SHA-1 hashing prevent hash churn and provide instant cache validation.
+- **Zero-Friction Fallback:** Degrades seamlessly to Polymer's original monolithic pack delivery on any generation, cache, or provider issue.
 
-## AutoHost compatibility
+---
 
-Split delivery is supported with Polymer's built-in local providers:
+## Supported Versions
 
-```text
-polymer:automatic
-polymer:auto
-polymer:netty
-polymer:same_port
-polymer:http_server
-polymer:standalone
-```
+| Minecraft | Build Target | Java | Polymer |
+| --- | --- | ---: | --- |
+| 1.21.8 | 1.21.8 | 21 | 0.13.13+1.21.8 |
+| 1.21.9-1.21.10 | 1.21.10 | 21 | 0.14.4+1.21.10 |
+| 1.21.11 | 1.21.11 | 21 | 0.15.2+1.21.11 |
+| 26.1-26.1.2 | 26.1.2 | 25 | 0.16.5+26.1.2 |
+| 26.2 | 26.2 | 25 | 0.17.5+26.2 |
+| 26.3+ | 26.3 | 25 | 0.18.2+26.3 |
 
-AutoHost disabled, `polymer:external`, `polymer:empty`, and unknown/custom providers do not enable split delivery. The original Polymer delivery path is left unsuppressed. PolymerSplitter does not upload split ZIPs to external hosting.
+---
+
+## AutoHost Compatibility
+
+PolymerSplitter integrates directly with Polymer's built-in local AutoHost providers:
+
+- `polymer:automatic`
+- `polymer:auto`
+- `polymer:netty`
+- `polymer:same_port`
+- `polymer:http_server`
+- `polymer:standalone`
+
+*Note:* If AutoHost is disabled, set to `polymer:external` or `polymer:empty`, or using an unknown/custom provider, split delivery is disabled and Polymer's original delivery path remains unsuppressed. External uploads are not supported.
+
+---
 
 ## Commands
 
-Administrator commands:
+All commands require administrator permissions (level 2+ or modern permission predicate).
 
-| Command | Purpose |
+| Command | Description |
 | --- | --- |
-| `/polymersplitter status` | Show split/cache/AutoHost state. |
-| `/polymersplitter list` | List the active split namespaces. |
-| `/polymersplitter reload` | Reload `config/polymersplitter.json`. |
-| `/polymersplitter rebuild` | Ask Polymer to regenerate, then run the normal split pipeline. |
-| `/polymersplitter send <targets> all` | Push every active split pack to the selected players. |
-| `/polymersplitter send <targets> namespace <namespace>` | Push one active namespace pack. |
+| `/polymersplitter status` | Display current split state, cache status, and active AutoHost provider. |
+| `/polymersplitter list` | List active split namespaces and their pack sizes. |
+| `/polymersplitter reload` | Reload configuration from `config/polymersplitter.json`. |
+| `/polymersplitter rebuild` | Trigger Polymer pack regeneration followed by split publication. |
+| `/polymersplitter send <targets> all` | Push all active split packs to specified players. |
+| `/polymersplitter send <targets> namespace <namespace>` | Push a single active namespace pack to specified players. |
 
-`<targets>` uses Minecraft's normal player selector argument, so selectors such as `@a`, `@p`, `@r`, and filtered selectors work.
+`<targets>` supports standard vanilla player selectors (`@a`, `@p`, `@r`, or target filters). Tab completion is available for active namespaces in the `READY` generation.
 
-The namespace argument offers tab completion from the current `READY` generation, including partial-name matching. Command feedback uses a cyan prefix, gray labels, highlighted values, and green/yellow/red status colors.
-
-Examples:
-
-```text
-/polymersplitter send @a all
-/polymersplitter send @p namespace minecraft
-/polymersplitter send @a[tag=builders] namespace polyfactory
-```
-
-The send command re-pushes the current `READY` split generation; it does not rebuild packs. `all` means PolymerSplitter's active split packs only, not Polymer AutoHost global/external packs. Required/prompt behavior remains controlled by Polymer AutoHost.
+---
 
 ## Configuration
 
-The configuration file is created at `config/polymersplitter.json`.
-
-A missing file is created with the defaults below. Missing settings use defaults in memory; startup/reload adds newly introduced settings while preserving existing fields. An empty or whitespace-only file is invalid and prevents initialization.
-
-Use `/polymersplitter reload` to reload the file. Output-affecting settings—including namespace policy—become active for the next Polymer generation; run `/polymersplitter rebuild` after reload to apply them immediately. Retention-policy changes apply at the next successful startup cache restore. The current READY generation remains active until then. Changing `enabled` still requires a server restart because hook registration is a startup concern.
-
-On POSIX filesystems, newly saved configuration and cache-index JSON files use mode `0644` so an administrator using a different SFTP account can read them. Existing files are rewritten on load only when adding the missing size option; older files saved with mode `0600` may otherwise require a one-time read-permission adjustment. These JSON files contain settings and cache metadata, not credentials.
+Configuration is located at `config/polymersplitter.json` and generated with defaults on first launch:
 
 ```json
 {
@@ -90,29 +85,37 @@ On POSIX filesystems, newly saved configuration and cache-index JSON files use m
 }
 ```
 
-Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon`, `deterministicZip`, `minSplitPackSizeMb`, or `compressionLevel` invalidates cache reuse rather than reusing ZIPs produced under different settings.
+### Options
 
-`compressionLevel` accepts `0` through `9` and is passed to Java's ZIP deflater for newly generated namespace packs. The default is `6`.
+| Setting | Type | Default | Description |
+| --- | --- | ---: | --- |
+| `enabled` | boolean | `true` | Enables PolymerSplitter. Requires a server restart if changed. |
+| `splitMode` | string | `"namespace"` | Splitting strategy. Currently only `"namespace"` is supported. |
+| `copyPackIcon` | boolean | `true` | Includes `pack.png` in every split pack. |
+| `deterministicZip` | boolean | `true` | Enforces fixed 1980-01-01 timestamps and sorted entry ordering. |
+| `logPackSizes` | boolean | `true` | Logs uncompressed and compressed pack sizes during generation. |
+| `minSplitPackSizeMb` | integer | `30` | Minimum compressed size (MiB) for non-primary packs. Packs at or below this are merged into the primary pack (`0` disables merging). |
+| `compressionLevel` | integer | `6` | ZIP deflate compression level (`0`-`9`). |
+| `includeNamespaces` | string[] | `[]` | Allowlist of namespaces to keep separate. If non-empty, unlisted namespaces merge into the primary pack. |
+| `excludeNamespaces` | string[] | `[]` | Denylist of namespaces to force-merge into the primary pack. Exclude takes precedence over include. |
+| `unreferencedBlobRetentionDays` | integer | `0` | Startup GC retention for unreferenced blobs: `0` deletes immediately on startup, `>0` retains for N days, `-1` disables GC. |
 
-Namespace policy never discards resources. An empty `includeNamespaces` list means every non-primary pack candidate is eligible to remain independent. When it is non-empty, only matching candidates are eligible; all others are merged into the primary pack. `excludeNamespaces` always wins. Synthetic pack keys can be named directly, and they also inherit their source namespace policy. For example, `minecraft.sounds` is affected by both `minecraft.sounds` and `minecraft`. The primary namespace itself always remains the primary pack. Size-based merging is applied after this policy.
+*Behavior Notes:*
+- Policy filters never discard assets; excluded or undersized packs are merged into the primary pack.
+- `minecraft.sounds` matches both its synthetic key and the `minecraft` source namespace.
+- Changes to output-affecting settings (`copyPackIcon`, `deterministicZip`, `minSplitPackSizeMb`, `compressionLevel`, namespace filters) invalidate cache reuse and take effect on the next generation. Use `/polymersplitter rebuild` to apply immediately.
 
-`unreferencedBlobRetentionDays` controls safe startup garbage collection of old content-addressed blobs. `0` keeps the existing behavior and deletes unreferenced blobs at the next successful startup restore, a positive value retains them until they are at least that many days old, and `-1` disables automatic hosted-blob GC. Runtime rebuilds never delete historical blobs.
+---
 
-`minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
+## Building
 
-When present, `assets/minecraft/sounds/**/*.ogg` is emitted as the synthetic pack key `minecraft.sounds`; `sounds.json` stays in the primary `minecraft` pack. Namespace policy applies to the synthetic key as well as its source namespace: excluding either `minecraft.sounds` or `minecraft` forces the sound payload into the primary pack, while an include list may allow it with either key. `minSplitPackSizeMb` also applies, so a small sound pack is merged back into the primary pack. When it remains independent it can be targeted with `/polymersplitter send <targets> namespace minecraft.sounds`. Declared overlay OGG files follow the same rule.
-
-## Build
-
-JDK 25 is required to build all targets.
+Requires JDK 25.
 
 ```bash
+# Build all targets
 ./gradlew build
-```
 
-Each version can also be built independently, for example:
-
-```bash
+# Build a specific target
 ./gradlew :mc-1.21.8:build
 ./gradlew :mc-1.21.10:build
 ./gradlew :mc-1.21.11:build
@@ -120,3 +123,13 @@ Each version can also be built independently, for example:
 ./gradlew :mc-26.2:build
 ./gradlew :mc-26.3:build
 ```
+
+---
+
+## Documentation
+
+- [README.ko.md](README.ko.md) - 한국어 문서 (Korean documentation).
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime flow, cache invariants, storage model, and internal design.
+- [AGENTS.md](AGENTS.md) - Repository rules, hard invariants, and development guidelines for coding agents.
+- [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md) - Audited upstream Polymer API boundaries.
+- [ROADMAP.md](ROADMAP.md) - Completed milestones and upcoming architecture goals.
