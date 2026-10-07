@@ -98,6 +98,31 @@ public final class SplitCoordinator {
 
             Optional<SplitCacheIndex.Snapshot> previousCache =
                     loadCompatibleVerifiedCacheBestEffort();
+
+            if (previousCache.isPresent()
+                    && previousCache.get().sourceHash().equals(hash)) {
+                SplitGeneration generation = SplitGeneration.create(
+                        hash,
+                        previousCache.get().packs()
+                );
+
+                // The source bytes, output compatibility, index metadata, and every
+                // referenced immutable blob already match. Re-register the hosted
+                // files, but skip namespace discovery/fingerprinting/ZIP generation
+                // and leave the durable index untouched.
+                beforePublish.accept(generation.packs());
+
+                snapshot.updateAndGet(current -> new CoordinatorSnapshot(
+                        SplitState.READY,
+                        generation,
+                        null,
+                        NamespaceTransition.between(current.generation(), generation)
+                ));
+
+                cleanupLegacyArtifactsBestEffort();
+                return generation.packs();
+            }
+
             List<SplitPack> reusablePacks = previousCache
                     .map(SplitCacheIndex.Snapshot::packs)
                     .orElseGet(List::of);

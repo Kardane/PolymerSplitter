@@ -319,6 +319,23 @@ The SHA-256 fingerprint includes:
 
 A shared metadata change therefore invalidates all namespace fingerprints.
 
+### Whole-source unchanged fast path
+
+After Polymer finishes generation, the coordinator always computes the final source ZIP SHA-1. Before opening the ZIP for namespace discovery, it loads the previous cache through the same output-compatibility gate used by startup restore and namespace reuse.
+
+The entire split stage is skipped only when all of the following are true:
+
+```text
+sourceSha1 matches
+AND output compatibility matches
+AND index metadata is valid
+AND every referenced hosted blob passes size/SHA-1 verification
+```
+
+On a hit, the cached `SplitGeneration` is reconstructed from the verified packs, the immutable hosted files are registered again with AutoHost, and one atomic `CoordinatorSnapshot` is published as `READY`. `PackSplitter.split()`, namespace enumeration, namespace fingerprints, ZIP writes, and `index.json` rewrite are all skipped.
+
+A missing, incompatible, malformed, or unverifiable cache is a fast-path miss. Normal split generation continues; source hash equality by itself is never sufficient.
+
 ### New generation
 
 For each namespace:
@@ -333,7 +350,7 @@ For each namespace:
 8. Register the content-addressed hosted ID.
 9. After all namespaces are ready, atomically replace `index.json` with the current compatibility key.
 
-A failed publication can leave an unreferenced immutable blob, but cannot remap an issued URL or advance the current index.
+A failed publication can leave an unreferenced immutable blob, but cannot remap an issued URL or advance the current index. A whole-source fast-path hit creates no new blob and does not rewrite the index.
 
 ### Startup read and verification
 
@@ -559,7 +576,8 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - AutoHost registration failure: whole new registry is not published.
 - Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
 - `index.json` write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
-- Compatible-cache integrity verification failure: cached publication is skipped and Polymer's main pack remains the fallback.
+- Compatible-cache integrity verification failure during startup restore: cached publication is skipped and Polymer's main pack remains the fallback.
+- Compatible-cache verification failure during a generated-pack rebuild: whole-source/namespace reuse is skipped and normal splitting continues.
 - Legacy metadata/blob import failure is a cache miss; current generation can still proceed without reuse.
 - Legacy-artifact or unreferenced-blob cleanup failure: ignored for delivery purposes.
 - Polymer reports output issues on modern versions: split generation is marked failed.
