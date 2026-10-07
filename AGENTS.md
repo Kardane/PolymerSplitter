@@ -26,7 +26,8 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Never remap an already issued content-addressed URL to different bytes.
 - Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
 - `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.
-- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip`. Diagnostic settings such as `logPackSizes` are not output compatibility.
+- Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip` + `minSplitPackSizeMb` + `compressionLevel`. Diagnostic settings such as `logPackSizes` are not output compatibility.
+- Config reload may update the coordinator's immutable split config for future generations, but must not invalidate the currently published READY generation. `enabled` remains startup-scoped unless lifecycle hook registration is explicitly redesigned.
 - Whole-source fast reuse is allowed only when source SHA-1 matches a compatible, fully verified index. It may skip splitting/fingerprinting/index rewrite, but must still complete hosted registration before publishing READY.
 - Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Incompatible or metadata-free old caches are cache misses, not current output. Mutation belongs only to generation, legacy blob import, or explicit cleanup.
 - For changed-source publication, publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed. Whole-source fast reuse may skip the rewrite only when the existing compatible index and every referenced blob have already verified.

@@ -127,6 +127,7 @@ public final class PackSplitter {
                             entries,
                             temp,
                             config.deterministicZip(),
+                            config.compressionLevel(),
                             ioBuffer
                     );
 
@@ -350,6 +351,7 @@ public final class PackSplitter {
             List<ZipEntry> assetEntries,
             Path target,
             boolean deterministic,
+            int compressionLevel,
             byte[] ioBuffer
     ) throws IOException {
         MessageDigest sha1 = Hashes.sha1();
@@ -358,6 +360,7 @@ public final class PackSplitter {
              DigestOutputStream digestOutput = new DigestOutputStream(rawOutput, sha1);
              ZipOutputStream output = new ZipOutputStream(digestOutput)) {
 
+            output.setLevel(compressionLevel);
             copyEntry(source, packMeta, PACK_META, output, deterministic, ioBuffer);
 
             if (packIcon != null && !packIcon.isDirectory()) {

@@ -30,6 +30,7 @@ public final class PolymerSplitterCommands {
                         .requires(CommandPermissions::canUse)
                         .then(Commands.literal("status").executes(context -> status(context.getSource())))
                         .then(Commands.literal("list").executes(context -> list(context.getSource())))
+                        .then(Commands.literal("reload").executes(context -> reload(context.getSource())))
                         .then(Commands.literal("rebuild").executes(context -> rebuild(context.getSource())))
                         .then(Commands.literal("send")
                                 .then(Commands.argument("targets", EntityArgument.players())
@@ -174,6 +175,44 @@ public final class PolymerSplitterCommands {
                 .append(field("packets", result.packetsSent(), ChatFormatting.WHITE)), true);
 
         return result.packetsSent();
+    }
+
+    private static int reload(CommandSourceStack source) {
+        try {
+            var result = PolymerSplitter.reloadConfig();
+            var config = PolymerSplitter.config();
+
+            source.sendSuccess(() -> message("Config reloaded", ChatFormatting.GREEN)
+                    .append(field("compressionLevel", config.compressionLevel(), ChatFormatting.WHITE))
+                    .append(field("minSplitPackSizeMb", config.minSplitPackSizeMb(), ChatFormatting.WHITE))
+                    .append(field("outputChanged", result.outputSettingsChanged(),
+                            result.outputSettingsChanged() ? ChatFormatting.YELLOW : ChatFormatting.GRAY)), false);
+
+            if (result.outputSettingsChanged()) {
+                source.sendSuccess(() -> message(
+                        "Output settings will apply to the next Polymer generation; run /polymersplitter rebuild to apply them now",
+                        ChatFormatting.YELLOW
+                ), false);
+            }
+
+            if (result.enabledRestartRequired()) {
+                source.sendSuccess(() -> message(
+                        "enabled=" + result.configuredEnabled()
+                                + " requires a server restart; effective enabled="
+                                + result.effectiveEnabled(),
+                        ChatFormatting.YELLOW
+                ), false);
+            }
+
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(message(
+                    "Config reload failed: "
+                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()),
+                    ChatFormatting.RED
+            ));
+            return 0;
+        }
     }
 
     private static int rebuild(CommandSourceStack source) {

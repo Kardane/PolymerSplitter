@@ -46,6 +46,7 @@ Administrator commands:
 | --- | --- |
 | `/polymersplitter status` | Show split/cache/AutoHost state. |
 | `/polymersplitter list` | List the active split namespaces. |
+| `/polymersplitter reload` | Reload `config/polymersplitter.json`. |
 | `/polymersplitter rebuild` | Ask Polymer to regenerate, then run the normal split pipeline. |
 | `/polymersplitter send <targets> all` | Push every active split pack to the selected players. |
 | `/polymersplitter send <targets> namespace <namespace>` | Push one active namespace pack. |
@@ -68,7 +69,9 @@ The send command re-pushes the current `READY` split generation; it does not reb
 
 The configuration file is created at `config/polymersplitter.json`.
 
-A missing file is created with the defaults below. Missing settings use defaults in memory; startup adds `minSplitPackSizeMb` if absent while preserving existing fields. An empty or whitespace-only file is invalid and prevents initialization. Configuration changes take effect after restarting the server.
+A missing file is created with the defaults below. Missing settings use defaults in memory; startup/reload adds newly introduced settings while preserving existing fields. An empty or whitespace-only file is invalid and prevents initialization.
+
+Use `/polymersplitter reload` to reload the file. Output-affecting settings become active for the next Polymer generation; run `/polymersplitter rebuild` after reload to apply them immediately. The current READY generation remains active until then. Changing `enabled` still requires a server restart because hook registration is a startup concern.
 
 On POSIX filesystems, newly saved configuration and cache-index JSON files use mode `0644` so an administrator using a different SFTP account can read them. Existing files are rewritten on load only when adding the missing size option; older files saved with mode `0600` may otherwise require a one-time read-permission adjustment. These JSON files contain settings and cache metadata, not credentials.
 
@@ -79,11 +82,14 @@ On POSIX filesystems, newly saved configuration and cache-index JSON files use m
   "copyPackIcon": true,
   "deterministicZip": true,
   "logPackSizes": true,
-  "minSplitPackSizeMb": 30
+  "minSplitPackSizeMb": 30,
+  "compressionLevel": 6
 }
 ```
 
-Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon` or `deterministicZip` invalidates cache reuse rather than reusing ZIPs produced under different settings.
+Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon`, `deterministicZip`, `minSplitPackSizeMb`, or `compressionLevel` invalidates cache reuse rather than reusing ZIPs produced under different settings.
+
+`compressionLevel` accepts `0` through `9` and is passed to Java's ZIP deflater for newly generated namespace packs. The default is `6`.
 
 `minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
 

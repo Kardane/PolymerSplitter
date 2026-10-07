@@ -266,18 +266,23 @@ Optimize generation after correctness and lifecycle behavior are stable.
 
 ## Phase 18 — Advanced configuration
 
+**Status:** in progress
+
 Expose additional policy only after the underlying semantics are implemented.
 
-Candidates:
+### Implemented
 
-- `includeNamespaces`
-- `excludeNamespaces`
-- small-pack grouping threshold
-- generation retention count
-- ZIP compression level
-- configuration reload
+- `minSplitPackSizeMb` controls small-namespace merging and participates in output compatibility.
+- `compressionLevel` controls ZIP deflate level from `0` through `9` and participates in output compatibility.
+- `/polymersplitter reload` reloads the configuration without discarding the current READY generation.
+- Diagnostic-only settings such as `logPackSizes` take effect immediately after reload.
+- Output-affecting settings take effect on the next Polymer generation; operators can use `/polymersplitter rebuild` to apply them immediately.
+- `enabled` remains startup-scoped and reload reports when a restart is required.
 
-Excluded namespaces must not simply disappear from the resource pack; they must remain available through a safe fallback or grouped pack strategy.
+### Deferred policy
+
+- Namespace include/exclude policy remains undefined; excluded resources must never simply disappear and need explicit merge/fallback semantics before implementation.
+- Generation-count retention does not match the current single-index/content-addressed-blob storage model. If retention becomes necessary, define it in terms of unreferenced hosted blobs rather than removed generation directories.
 
 ## Phase 19 — Operational commands
 

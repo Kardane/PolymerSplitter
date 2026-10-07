@@ -317,9 +317,11 @@ algorithmVersion
 copyPackIcon
 deterministicZip
 minSplitPackSizeMb
+compressionLevel
+minSplitPackSizeMb
 ```
 
-`logPackSizes` is diagnostic only and does not affect output compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
+`logPackSizes` is diagnostic only and does not affect output compatibility. Small-pack threshold and ZIP compression level do affect output and therefore participate in compatibility. The algorithm version is bumped when split/fingerprint/output semantics change in a way that makes old blobs unsafe to reuse.
 
 Configuration and cache-index writes create same-directory temporary JSON files with explicit POSIX mode `0644` before atomic replacement. This prevents the default restrictive temporary-file permissions from making root-generated JSON unreadable to an administrator's SFTP account. Non-POSIX filesystems retain their normal temporary-file behavior. Configuration loading adds a missing `minSplitPackSizeMb` field with default `30`, preserving other JSON fields through an atomic save. Cache reads remain non-mutating. Older `0600` files otherwise require an explicit permission adjustment or a later write. This permission policy applies only to non-secret settings/cache JSON, not arbitrary files or credentials.
 
@@ -366,7 +368,7 @@ For each namespace:
 2. Verify every referenced blob before it becomes a reuse candidate.
 3. Compute the namespace fingerprint.
 4. If the compatible verified cache has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
-5. Otherwise write one temporary ZIP inside `hosted/`. A SHA-1 `DigestOutputStream` wraps the raw file stream below `ZipOutputStream`, so the hash covers the exact emitted compressed ZIP bytes, including the central directory, without reopening the completed temporary file.
+5. Otherwise write one temporary ZIP inside `hosted/`. A SHA-1 `DigestOutputStream` wraps the raw file stream below `ZipOutputStream`, and the configured ZIP compression level is applied before entries are written, so the hash covers the exact emitted compressed ZIP bytes, including the central directory, without reopening the completed temporary file.
 6. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
 7. Register the content-addressed hosted ID.
 8. After all namespaces are ready, atomically replace `index.json` with the current compatibility key.
@@ -489,13 +491,18 @@ For legacy 1.21.x, Polymer's provider has its own generation-ready state. The sp
   "copyPackIcon": true,
   "deterministicZip": true,
   "logPackSizes": true,
-  "minSplitPackSizeMb": 30
+  "minSplitPackSizeMb": 30,
+  "compressionLevel": 6
 }
 ```
 
-Only `namespace` split mode is supported.
+Only `namespace` split mode is supported. `compressionLevel` accepts `0` through `9`; the default is `6`.
 
-When disabled, PolymerSplitter does not register its split collector/generation hook, and Polymer AutoHost keeps its normal behavior.
+`/polymersplitter reload` reparses the configuration and atomically replaces the coordinator's immutable `SplitterConfig`/output-compatibility pair. `logPackSizes` therefore changes immediately, while output-affecting settings apply to the next Polymer generation. The currently published READY generation is not invalidated merely because configuration changed. A rebuild can be requested explicitly to generate output under the new compatibility key.
+
+`enabled` remains startup-scoped. If reload observes a different configured value, the command reports that a server restart is required and the effective runtime enabled state is left unchanged.
+
+When disabled at startup, PolymerSplitter does not register its split collector/generation hook, and Polymer AutoHost keeps its normal behavior.
 
 ## 15. Commands
 
@@ -504,6 +511,7 @@ Administrator commands:
 ```text
 /polymersplitter status
 /polymersplitter list
+/polymersplitter reload
 /polymersplitter rebuild
 /polymersplitter send <targets> all
 /polymersplitter send <targets> namespace <namespace>

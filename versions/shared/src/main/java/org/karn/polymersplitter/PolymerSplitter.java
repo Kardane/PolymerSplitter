@@ -22,16 +22,21 @@ public final class PolymerSplitter implements ModInitializer {
     private static SplitRegistry registry;
     private static SplitCoordinator coordinator;
     private static PolymerSplitterConfig config;
+    private static Path configPath;
+    private static boolean runtimeEnabled;
 
     @Override
     public void onInitialize() {
         Path configDirectory = FabricLoader.getInstance().getConfigDir();
+        configPath = configDirectory.resolve("polymersplitter.json");
 
         try {
-            config = PolymerSplitterConfig.load(configDirectory.resolve("polymersplitter.json"));
+            config = PolymerSplitterConfig.load(configPath);
         } catch (IOException | RuntimeException e) {
             throw new IllegalStateException("Failed to load PolymerSplitter config", e);
         }
+
+        runtimeEnabled = config.enabled();
 
         coordinator = new SplitCoordinator(
                 configDirectory
@@ -43,7 +48,7 @@ public final class PolymerSplitter implements ModInitializer {
 
         PolymerSplitterCommands.register();
 
-        if (!config.enabled()) {
+        if (!runtimeEnabled) {
             LOGGER.log(System.Logger.Level.INFO,
                     "PolymerSplitter is disabled by config; Polymer AutoHost will use its normal resource pack");
             return;
@@ -133,7 +138,40 @@ public final class PolymerSplitter implements ModInitializer {
     }
 
     public static boolean isEnabled() {
-        return config != null && config.enabled();
+        return runtimeEnabled;
+    }
+
+    public static synchronized ReloadResult reloadConfig() throws IOException {
+        if (configPath == null || coordinator == null) {
+            throw new IllegalStateException("PolymerSplitter is not initialized");
+        }
+
+        PolymerSplitterConfig reloaded = PolymerSplitterConfig.load(configPath);
+        var previousSplitterConfig = coordinator.config();
+        var previousCompatibility = coordinator.outputCompatibility();
+        var nextSplitterConfig = reloaded.toSplitterConfig();
+
+        coordinator.updateConfig(nextSplitterConfig);
+        config = reloaded;
+
+        boolean outputSettingsChanged =
+                !previousCompatibility.equals(coordinator.outputCompatibility());
+        boolean logPackSizesChanged =
+                previousSplitterConfig.logPackSizes() != nextSplitterConfig.logPackSizes();
+        boolean enabledRestartRequired = reloaded.enabled() != runtimeEnabled;
+
+        LOGGER.log(System.Logger.Level.INFO,
+                "Reloaded PolymerSplitter config: outputChanged=" + outputSettingsChanged
+                        + ", logPackSizesChanged=" + logPackSizesChanged
+                        + ", enabledRestartRequired=" + enabledRestartRequired);
+
+        return new ReloadResult(
+                outputSettingsChanged,
+                logPackSizesChanged,
+                enabledRestartRequired,
+                reloaded.enabled(),
+                runtimeEnabled
+        );
     }
 
     public static boolean shouldUseSplitPacks() {
@@ -158,5 +196,14 @@ public final class PolymerSplitter implements ModInitializer {
 
     public static PolymerSplitterConfig config() {
         return config;
+    }
+
+    public record ReloadResult(
+            boolean outputSettingsChanged,
+            boolean logPackSizesChanged,
+            boolean enabledRestartRequired,
+            boolean configuredEnabled,
+            boolean effectiveEnabled
+    ) {
     }
 }

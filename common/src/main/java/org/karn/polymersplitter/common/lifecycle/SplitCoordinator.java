@@ -20,8 +20,8 @@ import java.util.function.Consumer;
 
 public final class SplitCoordinator {
     private final Path outputRoot;
-    private final SplitterConfig config;
-    private final OutputCompatibility outputCompatibility;
+    private volatile SplitterConfig config;
+    private volatile OutputCompatibility outputCompatibility;
     private final PackSplitter splitter = new PackSplitter();
     private final AtomicReference<CoordinatorSnapshot> snapshot =
             new AtomicReference<>(CoordinatorSnapshot.initial());
@@ -29,6 +29,11 @@ public final class SplitCoordinator {
 
     public SplitCoordinator(Path outputRoot, SplitterConfig config) {
         this.outputRoot = Objects.requireNonNull(outputRoot, "outputRoot").toAbsolutePath().normalize();
+        this.config = Objects.requireNonNull(config, "config");
+        this.outputCompatibility = OutputCompatibility.current(config);
+    }
+
+    public synchronized void updateConfig(SplitterConfig config) {
         this.config = Objects.requireNonNull(config, "config");
         this.outputCompatibility = OutputCompatibility.current(config);
     }

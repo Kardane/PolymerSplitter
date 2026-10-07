@@ -213,8 +213,9 @@ public final class SplitCacheIndex {
                 "deterministicZip",
                 outputCompatibility.deterministicZip()
         );
-        rootObject.add("output", outputObject);
         outputObject.addProperty("minSplitPackSizeMb", outputCompatibility.minSplitPackSizeMb());
+        outputObject.addProperty("compressionLevel", outputCompatibility.compressionLevel());
+        rootObject.add("output", outputObject);
 
         JsonArray array = new JsonArray();
         Set<String> namespaces = new HashSet<>();
@@ -279,13 +280,16 @@ public final class SplitCacheIndex {
         boolean deterministicZip = requireBoolean(output, "deterministicZip");
         int minSplitPackSizeMb = algorithmVersion < 3
                 ? 0 : requireInt(output, "minSplitPackSizeMb");
+        int compressionLevel = algorithmVersion < 4
+                ? 6 : requireInt(output, "compressionLevel");
 
         try {
             return new OutputCompatibility(
                     algorithmVersion,
                     copyPackIcon,
                     deterministicZip,
-                    minSplitPackSizeMb
+                    minSplitPackSizeMb,
+                    compressionLevel
             );
         } catch (IllegalArgumentException e) {
             throw new IOException("Invalid output compatibility metadata", e);

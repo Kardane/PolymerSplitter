@@ -24,6 +24,7 @@ public final class PolymerSplitterConfig {
     private boolean deterministicZip = true;
     private boolean logPackSizes = true;
     private int minSplitPackSizeMb = 30;
+    private int compressionLevel = 6;
 
     public static PolymerSplitterConfig load(Path path) throws IOException {
         Objects.requireNonNull(path, "path");
@@ -47,10 +48,20 @@ public final class PolymerSplitterConfig {
         }
 
         config.validate();
+
+        boolean migrated = false;
         if (!stored.has("minSplitPackSizeMb")) {
             stored.addProperty("minSplitPackSizeMb", config.minSplitPackSizeMb);
+            migrated = true;
+        }
+        if (!stored.has("compressionLevel")) {
+            stored.addProperty("compressionLevel", config.compressionLevel);
+            migrated = true;
+        }
+        if (migrated) {
             saveJson(path, GSON.toJson(stored));
         }
+
         return config;
     }
 
@@ -80,7 +91,8 @@ public final class PolymerSplitterConfig {
                 copyPackIcon,
                 deterministicZip,
                 logPackSizes,
-                minSplitPackSizeMb
+                minSplitPackSizeMb,
+                compressionLevel
         );
     }
 
@@ -92,13 +104,32 @@ public final class PolymerSplitterConfig {
         return splitMode;
     }
 
+    public boolean copyPackIcon() {
+        return copyPackIcon;
+    }
+
+    public boolean deterministicZip() {
+        return deterministicZip;
+    }
+
     public boolean logPackSizes() {
         return logPackSizes;
+    }
+
+    public int minSplitPackSizeMb() {
+        return minSplitPackSizeMb;
+    }
+
+    public int compressionLevel() {
+        return compressionLevel;
     }
 
     private void validate() {
         if (minSplitPackSizeMb < 0) {
             throw new IllegalArgumentException("minSplitPackSizeMb must be non-negative");
+        }
+        if (compressionLevel < 0 || compressionLevel > 9) {
+            throw new IllegalArgumentException("compressionLevel must be between 0 and 9");
         }
         if (!"namespace".equals(splitMode)) {
             throw new IllegalArgumentException(
