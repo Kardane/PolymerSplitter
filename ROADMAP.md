@@ -228,9 +228,9 @@ Do not implement naive file-type splitting. Cross-resource references such as mo
 - Base and declared-overlay `assets/minecraft/sounds/**/*.ogg` entries are moved into a synthetic physical pack keyed as `minecraft.sounds`.
 - `assets/minecraft/sounds.json` and every non-OGG `minecraft` resource stay in the primary `minecraft` pack.
 - The sound pack has its own deterministic UUID, fingerprint, SHA-1, content-addressed AutoHost ID, cache entry, and targeted-send key.
-- `minecraft.sounds` bypasses namespace include/exclude policy and `minSplitPackSizeMb`; if audio exists, the secondary pack is kept independent.
+- `minecraft.sounds` participates in the same include/exclude and size-threshold policy as other non-primary packs. It may be addressed directly as `minecraft.sounds`, and it also inherits policy from its source namespace `minecraft`; exclude wins over include.
 - If a real resource namespace named `minecraft.sounds` already exists, synthetic sound splitting is skipped rather than colliding with it.
-- Output algorithm version 6 and physical-pack fingerprint schema v5 invalidate incompatible caches.
+- Output algorithm version 7 and physical-pack fingerprint schema v5 invalidate incompatible caches.
 
 ### Remaining investigation
 

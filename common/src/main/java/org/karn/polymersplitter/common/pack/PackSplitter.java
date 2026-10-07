@@ -92,7 +92,10 @@ public final class PackSplitter {
                 boolean minecraftSoundsPack = MINECRAFT_SOUNDS_PACK.equals(namespace);
                 if (primary) {
                     entries.sort(Comparator.comparing(ZipEntry::getName));
-                } else if (!minecraftSoundsPack && !config.shouldSplitIndependently(namespace)) {
+                } else if (!config.shouldSplitIndependently(
+                        namespace,
+                        minecraftSoundsPack ? MINECRAFT_NAMESPACE : namespace
+                )) {
                     primaryEntries.addAll(entries);
                     logPolicyMergedNamespace(namespace, primaryNamespace);
                     continue;
@@ -107,7 +110,7 @@ public final class PackSplitter {
 
                 SplitPack reusable = reusableByNamespace.get(namespace);
                 if (canReuse(reusable, fingerprint)) {
-                    if (!primary && !minecraftSoundsPack
+                    if (!primary
                             && minimumSize > 0 && reusable.size() <= minimumSize) {
                         primaryEntries.addAll(entries);
                         logMergedNamespace(namespace, primaryNamespace, reusable.size());
@@ -142,7 +145,7 @@ public final class PackSplitter {
                             ioBuffer
                     );
 
-                    if (!primary && !minecraftSoundsPack
+                    if (!primary
                             && minimumSize > 0 && written.size() <= minimumSize) {
                         primaryEntries.addAll(entries);
                         logMergedNamespace(namespace, primaryNamespace, written.size());

@@ -94,13 +94,13 @@ Only `namespace` split mode is currently supported. Changing output-affecting op
 
 `compressionLevel` accepts `0` through `9` and is passed to Java's ZIP deflater for newly generated namespace packs. The default is `6`.
 
-Namespace policy never discards resources. An empty `includeNamespaces` list means every namespace is eligible to remain independent. When it is non-empty, only listed non-primary namespaces are eligible for independent packs; all others are merged into the primary pack. `excludeNamespaces` always wins and forces matching non-primary namespaces into the primary pack. The primary namespace itself always remains the primary pack. Size-based merging is applied after this policy.
+Namespace policy never discards resources. An empty `includeNamespaces` list means every non-primary pack candidate is eligible to remain independent. When it is non-empty, only matching candidates are eligible; all others are merged into the primary pack. `excludeNamespaces` always wins. Synthetic pack keys can be named directly, and they also inherit their source namespace policy. For example, `minecraft.sounds` is affected by both `minecraft.sounds` and `minecraft`. The primary namespace itself always remains the primary pack. Size-based merging is applied after this policy.
 
 `unreferencedBlobRetentionDays` controls safe startup garbage collection of old content-addressed blobs. `0` keeps the existing behavior and deletes unreferenced blobs at the next successful startup restore, a positive value retains them until they are at least that many days old, and `-1` disables automatic hosted-blob GC. Runtime rebuilds never delete historical blobs.
 
 `minSplitPackSizeMb` uses MiB (1,048,576 bytes). Non-primary namespace ZIPs at or below the threshold are merged into the primary pack with their original resource paths; larger packs remain separate. The primary pack always remains, even below the threshold. Set `0` to disable size-based merging. Changing the threshold invalidates cache reuse. Merged namespaces are no longer separately sendable packs or namespace suggestions; use `send ... all` to include their resources.
 
-When present, `assets/minecraft/sounds/**/*.ogg` is emitted as `minecraft.sounds`. `sounds.json` stays in the primary `minecraft` pack. The sound pack is deliberately not merged by `minSplitPackSizeMb` and can be targeted with `/polymersplitter send <targets> namespace minecraft.sounds`. Declared overlay OGG files follow the same rule.
+When present, `assets/minecraft/sounds/**/*.ogg` is emitted as the synthetic pack key `minecraft.sounds`; `sounds.json` stays in the primary `minecraft` pack. Namespace policy applies to the synthetic key as well as its source namespace: excluding either `minecraft.sounds` or `minecraft` forces the sound payload into the primary pack, while an include list may allow it with either key. `minSplitPackSizeMb` also applies, so a small sound pack is merged back into the primary pack. When it remains independent it can be targeted with `/polymersplitter send <targets> namespace minecraft.sounds`. Declared overlay OGG files follow the same rule.
 
 ## Build
 

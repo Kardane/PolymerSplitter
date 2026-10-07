@@ -29,8 +29,21 @@ public record SplitterConfig(
     }
 
     public boolean shouldSplitIndependently(String namespace) {
-        return !excludeNamespaces.contains(namespace)
-                && (includeNamespaces.isEmpty() || includeNamespaces.contains(namespace));
+        return shouldSplitIndependently(namespace, namespace);
+    }
+
+    public boolean shouldSplitIndependently(
+            String packKey,
+            String sourceNamespace
+    ) {
+        if (excludeNamespaces.contains(packKey)
+                || excludeNamespaces.contains(sourceNamespace)) {
+            return false;
+        }
+
+        return includeNamespaces.isEmpty()
+                || includeNamespaces.contains(packKey)
+                || includeNamespaces.contains(sourceNamespace);
     }
 
     private static List<String> normalizeNamespaces(
