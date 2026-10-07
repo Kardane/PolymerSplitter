@@ -6,7 +6,26 @@ on:
 
 jobs:
   build:
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: common
+            task: :common:build
+          - target: "1.21.8"
+            task: :mc-1.21.8:build
+          - target: "1.21.9-1.21.10"
+            task: :mc-1.21.10:build
+          - target: "1.21.11"
+            task: :mc-1.21.11:build
+          - target: "26.1"
+            task: :mc-26.1:build
+          - target: "26.2"
+            task: :mc-26.2:build
+          - target: "26.3"
+            task: :mc-26.3:build
 
     steps:
       - name: Checkout
@@ -22,4 +41,4 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build
-        run: ./gradlew build --no-daemon
+        run: ./gradlew ${{ matrix.task }} --no-daemon

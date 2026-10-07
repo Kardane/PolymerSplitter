@@ -4,6 +4,7 @@ plugins {
 
 ext {
     target_minecraft = "26.3"
+    artifact_minecraft = "26.3"
     minecraft_range = ">=26.3"
     loader_version = "0.19.5"
     fabric_api_version = "0.160.5+26.3"

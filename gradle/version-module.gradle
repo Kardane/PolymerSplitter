@@ -1,5 +1,5 @@
 base {
-    archivesName = "${rootProject.archives_base_name}-${target_minecraft}"
+    archivesName = "${rootProject.archives_base_name}-${artifact_minecraft}"
 }
 
 sourceSets {
