@@ -5,9 +5,13 @@ import eu.pb4.polymer.autohost.api.ResourcePackDataProvider;
 import eu.pb4.polymer.autohost.impl.AutoHost;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
 import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
+import net.minecraft.network.protocol.common.ClientboundResourcePackPushPacket;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
 import org.karn.polymersplitter.common.hosting.HostingStatus;
+import org.karn.polymersplitter.common.hosting.PackPushResult;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
+import org.karn.polymersplitter.common.lifecycle.SplitGeneration;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
 import org.karn.polymersplitter.common.pack.HostedPackStore;
 import org.karn.polymersplitter.common.pack.SplitPack;
@@ -15,8 +19,10 @@ import org.karn.polymersplitter.common.pack.SplitPack;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 public final class PolymerAutoHostBridge {
@@ -142,6 +148,70 @@ public final class PolymerAutoHostBridge {
 
             AutoHostUtils.registerHostedFile(identifier(pack), hostedPath);
         }
+    }
+
+
+    public static PackPushResult pushSplitPacks(
+            Collection<ServerPlayer> players,
+            SplitGeneration generation,
+            String namespace
+    ) {
+        HostingStatus hosting = currentHostingStatus();
+        if (!hosting.supported()) {
+            throw new IllegalStateException(
+                    "Split-pack hosting is unavailable: " + hosting.message()
+                            + " (provider=" + hosting.providerType() + ")"
+            );
+        }
+
+        List<SplitPack> selectedPacks;
+        if (namespace == null) {
+            selectedPacks = generation.packs();
+        } else {
+            SplitPack selected = generation.byNamespace().get(namespace);
+            if (selected == null) {
+                throw new IllegalArgumentException("Unknown split namespace: " + namespace);
+            }
+            selectedPacks = List.of(selected);
+        }
+
+        ResourcePackDataProvider provider = ResourcePackDataProvider.getActive();
+        String primaryNamespace = primaryNamespace(generation.packs());
+        int readyPlayers = 0;
+        int packetsSent = 0;
+
+        for (ServerPlayer player : players) {
+            PacketContext context = player.connection.getPacketContext();
+            if (!provider.isReady(context)) {
+                continue;
+            }
+            readyPlayers++;
+
+            for (SplitPack pack : selectedPacks) {
+                var properties = provider.createProperties(
+                        context,
+                        effectiveUuid(pack, primaryNamespace),
+                        identifier(pack),
+                        pack.sha1()
+                );
+
+                player.connection.send(new ClientboundResourcePackPushPacket(
+                        properties.id(),
+                        properties.url(),
+                        properties.hash(),
+                        properties.isRequired(),
+                        Optional.ofNullable(properties.prompt())
+                ));
+                packetsSent++;
+            }
+        }
+
+        return new PackPushResult(
+                players.size(),
+                readyPlayers,
+                selectedPacks.size(),
+                packetsSent
+        );
     }
 
     public static void clearHostedRegistrations() {

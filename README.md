@@ -4,7 +4,7 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
-**Status:** Phase 14 namespace lifecycle cleanup implemented  
+**Status:** Phase 14 stability baseline + targeted split-pack push command  
 **Client mod:** not required
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design and version boundaries.  
@@ -38,11 +38,27 @@ AutoHost disabled, `polymer:external`, `polymer:empty`, and unknown/custom provi
 
 ## Commands
 
+Administrator commands:
+
+| Command | Purpose |
+| --- | --- |
+| `/polymersplitter status` | Show split/cache/AutoHost state. |
+| `/polymersplitter list` | List the active split namespaces. |
+| `/polymersplitter rebuild` | Ask Polymer to regenerate, then run the normal split pipeline. |
+| `/polymersplitter send <targets> all` | Push every active split pack to the selected players. |
+| `/polymersplitter send <targets> namespace <namespace>` | Push one active namespace pack. |
+
+`<targets>` uses Minecraft's normal player selector argument, so selectors such as `@a`, `@p`, `@r`, and filtered selectors work.
+
+Examples:
+
 ```text
-/polymersplitter status
-/polymersplitter list
-/polymersplitter rebuild
+/polymersplitter send @a all
+/polymersplitter send @p namespace minecraft
+/polymersplitter send @a[tag=builders] namespace polyfactory
 ```
+
+The send command re-pushes the current `READY` split generation; it does not rebuild packs. `all` means PolymerSplitter's active split packs only, not Polymer AutoHost global/external packs. Required/prompt behavior remains controlled by Polymer AutoHost.
 
 ## Configuration
 

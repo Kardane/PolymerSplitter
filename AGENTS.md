@@ -1,72 +1,59 @@
 # AGENTS.md
 
-This file is the repository-level operating guide for coding agents. Keep it short. Put durable design details in [ARCHITECTURE.md](ARCHITECTURE.md) instead of expanding this file.
+Repository-level instructions for coding agents. Keep this file small; use it as a map to the durable documentation instead of duplicating design detail.
 
-## Read first
+## Start here
 
-Before changing code, read:
+Read the minimum relevant context before editing:
 
-1. `README.md` for supported versions and user-facing behavior.
-2. `ARCHITECTURE.md` for runtime flow, invariants, version boundaries, and known limitations.
-3. The target version's `versions/mc-*/build.gradle` before editing version-specific integration.
+1. [README.md](README.md) — user-facing behavior, commands, supported versions.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) — runtime flow, invariants, failure semantics, version boundaries.
+3. [ROADMAP.md](ROADMAP.md) — planned work and completed phase boundaries.
+4. The affected `versions/mc-*/build.gradle` — exact Minecraft, Fabric, Polymer, Java, and adapter selection.
 
-If a change alters architecture, lifecycle, compatibility boundaries, caching, pack identity, or failure behavior, update `ARCHITECTURE.md` in the same change.
+Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, hosting, delivery, compatibility, or failure behavior changes. Keep README user-facing.
 
-## Project contract
+## Hard invariants
 
-PolymerSplitter is a server-only Fabric companion for [Polymer](https://github.com/Patbox/polymer).
-
-Preserve these invariants:
-
-- Split Polymer's final generated resource pack by `assets/<namespace>/`.
-- Preserve declared resource-pack overlays by routing each overlay's `assets/<namespace>/` content into the matching namespace pack.
-- Preserve ordinary root-level files in every split pack; fail safely instead of guessing unknown root-directory semantics.
-- Do not implement a separate HTTP server; hosting and delivery belong to Polymer AutoHost.
-- Enable split delivery only for explicitly supported built-in local AutoHost providers; external, empty, disabled, or unknown/custom providers must not cause main-pack suppression or split URL advertisement.
-- Vanilla clients must not require PolymerSplitter or another client mod.
-- Keep namespace pack UUIDs stable across content changes.
-- Use Polymer's main resource-pack UUID for the primary split pack (`minecraft` when present).
-- Use the final split ZIP SHA-1 for Polymer/Minecraft pack metadata.
-- Use content-addressed AutoHost identifiers (`packs/<namespace>/<sha1>`) and immutable hosted blobs; never remap an old content URL to new bytes.
-- Treat the active split generation as one immutable snapshot; namespace additions/removals must become visible atomically.
-- Do not replace the visible split registry until immutable hosting, generation reconciliation, and the atomic cache index commit complete.
-- Restore a startup cache only after validating its metadata and every referenced split pack; a broken cache must never become visible.
-- If splitting or cache recovery fails or is not ready, leave Polymer's original main pack available as fallback.
-- Do not remove Polymer external/global resource packs.
-- Keep ZIP generation deterministic where practical and preserve cache reuse for unchanged namespaces.
-- Keep historical content-addressed hosted URLs valid during a running server; clear only PolymerSplitter's in-memory AutoHost mappings when the server is fully stopped.
-- Treat Polymer internal implementation as version-sensitive. Prefer public Polymer APIs; keep Mixins minimal.
+- This is a server-only Fabric companion for [Polymer](https://github.com/Patbox/polymer); vanilla clients need no PolymerSplitter mod.
+- Split the final Polymer pack by resource namespace and preserve declared overlays/root metadata according to `ARCHITECTURE.md`.
+- Hosting belongs to Polymer AutoHost. Do not add a separate HTTP server.
+- Split delivery is enabled only for explicitly supported built-in local AutoHost providers.
+- Preserve Polymer's required/prompt policy when automatically or manually pushing packs.
+- Keep namespace UUIDs stable. The primary pack uses Polymer's main UUID; non-primary packs use deterministic namespace UUIDs.
+- Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs.
+- Never remap an already issued content-addressed URL to different bytes.
+- Treat one `SplitGeneration` as the atomic active snapshot. Publish only after hosting, generation reconciliation, and cache-index commit succeed.
+- Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
+- Keep historical hosted URLs valid while a server is running; clear only PolymerSplitter-owned in-memory mappings after full server stop.
+- Prefer public Polymer APIs. Mixins exist only for original-main-pack suppression and should stay minimal.
+- Do not put Minecraft or Polymer types in `common`.
 
 ## Version boundaries
 
-| Target | Java | Generation | AutoHost ID/API | Mixin/commands |
+| Target | Java | Generation | AutoHost adapter | Commands |
 | --- | ---: | --- | --- | --- |
-| 1.21.8 | 21 | `versions/legacy` | `autohost-resource-location` | legacy |
-| 1.21.9-1.21.10 | 21 | `versions/legacy` | `autohost-resource-location` | legacy |
-| 1.21.11 | 21 | `versions/legacy` | `autohost-identifier-legacy` | legacy mixin / modern commands |
-| 26.1-26.3 | 25 | `versions/modern` | `autohost-identifier-modern` | modern |
+| 1.21.8 | 21 | `versions/legacy` | resource-location | legacy |
+| 1.21.9-1.21.10 | 21 | `versions/legacy` | resource-location | legacy |
+| 1.21.11 | 21 | `versions/legacy` | identifier-legacy | modern command API |
+| 26.1-26.3 | 25 | `versions/modern` | identifier-modern | modern |
 
-Before changing a Polymer integration point, inspect the matching upstream Polymer source. Current reference branches are `dev/1.21.6` for the 1.21.8-era API, `dev/1.21.9`, `dev/1.21.11`, `dev/26.1`, `dev/26.2`, and `dev/26.3`.
+Before changing a Polymer integration point, inspect the matching upstream branch: `dev/1.21.6`, `dev/1.21.9`, `dev/1.21.11`, `dev/26.1`, `dev/26.2`, or `dev/26.3`.
 
 ## Repository map
 
-- `common/src/main/java`: Minecraft/Polymer-independent splitting, identity, cache, hosting status, manifest, and lifecycle logic.
-- `versions/shared`: shared Fabric initializer, config, and resources.
-- `versions/legacy`, `versions/modern`: Polymer generation hooks.
-- `versions/autohost-*`: AutoHost API adapters.
-- `versions/mixin-*`: main-pack suppression only.
-- `versions/commands-*`: command API adapters.
-- `versions/mc-*`: dependency/version wiring only.
-- `gradle/version-module.gradle`: shared version-module assembly.
-- `ARCHITECTURE.md`: source of truth for system design.
-
-Do not put Minecraft or Polymer types into `common`.
+- `common` — splitter, identity, lifecycle snapshots, cache, immutable hosted blobs, provider-independent records.
+- `versions/shared` — Fabric initializer, config, shared resources.
+- `versions/legacy`, `versions/modern` — Polymer generation hooks.
+- `versions/autohost-*` — provider/context/packet integration.
+- `versions/mixin-*` — original Polymer main-pack suppression only.
+- `versions/commands-*` — command API differences.
+- `versions/mc-*` — dependency/version wiring only.
+- `gradle/version-module.gradle` — shared version-module assembly.
 
 ## Validation
 
-The user wants build-only validation.
-
-Allowed validation commands:
+Validation is build-only unless the user explicitly requests otherwise.
 
 ```bash
 ./gradlew build --no-daemon
@@ -78,12 +65,12 @@ Allowed validation commands:
 ./gradlew :mc-26.3:build --no-daemon
 ```
 
-Do not start Minecraft, run a server, run game/functional/integration tests, or add/run separate test suites unless the user explicitly asks. For cross-version changes, prefer the CI build matrix or build every affected target.
+Do not start Minecraft, launch a server, or add/run unit, gameplay, functional, integration, or runtime tests unless explicitly requested. Cross-version changes must build every affected target.
 
 ## Change discipline
 
-- Make the smallest version-specific adapter change that preserves common code.
-- Do not broaden Minecraft version ranges without verifying the matching Polymer/Fabric APIs.
-- Do not copy decompiled third-party code into this repository.
-- Keep README user-facing and concise; keep implementation detail in `ARCHITECTURE.md`.
-- Avoid speculative abstractions. Add a new adapter only when an actual API boundary requires it.
+- Prefer one common implementation plus the smallest necessary version adapter.
+- Verify upstream Polymer/Fabric APIs before widening compatibility or using internal implementation classes.
+- Do not copy decompiled third-party code.
+- Avoid speculative abstractions; add an adapter only for a real API boundary.
+- Keep documentation cross-linked and remove stale rules instead of accumulating exceptions.

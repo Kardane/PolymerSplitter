@@ -1,8 +1,10 @@
 package org.karn.polymersplitter.command;
 
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import org.karn.polymersplitter.PolymerSplitter;
 import org.karn.polymersplitter.common.pack.SplitPack;
@@ -22,6 +24,25 @@ public final class PolymerSplitterCommands {
                         .then(Commands.literal("status").executes(context -> status(context.getSource())))
                         .then(Commands.literal("list").executes(context -> list(context.getSource())))
                         .then(Commands.literal("rebuild").executes(context -> rebuild(context.getSource())))
+                        .then(Commands.literal("send")
+                                .then(Commands.argument("targets", EntityArgument.players())
+                                        .then(Commands.literal("all")
+                                                .executes(context -> send(
+                                                        context.getSource(),
+                                                        EntityArgument.getPlayers(context, "targets"),
+                                                        null
+                                                )))
+                                        .then(Commands.literal("namespace")
+                                                .then(Commands.argument("namespace", StringArgumentType.word())
+                                                        .executes(context -> send(
+                                                                context.getSource(),
+                                                                EntityArgument.getPlayers(context, "targets"),
+                                                                StringArgumentType.getString(context, "namespace")
+                                                        ))
+                                                )
+                                        )
+                                )
+                        )
                 )
         );
     }
@@ -93,6 +114,58 @@ public final class PolymerSplitterCommands {
         }
 
         return packs.size();
+    }
+
+    private static int send(
+            CommandSourceStack source,
+            java.util.Collection<net.minecraft.server.level.ServerPlayer> targets,
+            String namespace
+    ) {
+        var hosting = PolymerAutoHostBridge.currentHostingStatus();
+        if (!hosting.supported()) {
+            source.sendFailure(Component.literal(
+                    "Split delivery is unavailable: " + hosting.message()
+                            + " (provider=" + hosting.providerType() + ")"
+            ));
+            return 0;
+        }
+
+        var generation = PolymerSplitter.registry().currentGeneration();
+        if (generation == null || PolymerSplitter.coordinator().state()
+                != org.karn.polymersplitter.common.lifecycle.SplitState.READY) {
+            source.sendFailure(Component.literal(
+                    "No split generation is ready"
+            ));
+            return 0;
+        }
+
+        if (namespace != null && !generation.byNamespace().containsKey(namespace)) {
+            source.sendFailure(Component.literal(
+                    "Unknown split namespace: " + namespace
+            ));
+            return 0;
+        }
+
+        var result = PolymerAutoHostBridge.pushSplitPacks(
+                targets,
+                generation,
+                namespace
+        );
+
+        if (result.readyPlayers() == 0) {
+            source.sendFailure(Component.literal(
+                    "AutoHost is not ready for any selected player"
+            ));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.literal(
+                "Pushed " + result.selectedPacks() + " split pack(s) to "
+                        + result.readyPlayers() + "/" + result.targetedPlayers()
+                        + " player(s) (" + result.packetsSent() + " packet(s))"
+        ), true);
+
+        return result.packetsSent();
     }
 
     private static int rebuild(CommandSourceStack source) {

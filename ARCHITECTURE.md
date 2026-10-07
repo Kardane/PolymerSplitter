@@ -34,6 +34,7 @@ The design optimizes for one outcome: when only one namespace changes, clients s
 common/
   hosting/
     HostingStatus
+    PackPushResult
   lifecycle/
     SplitCoordinator
     SplitGeneration
@@ -445,9 +446,31 @@ Administrator commands:
 /polymersplitter status
 /polymersplitter list
 /polymersplitter rebuild
+/polymersplitter send <targets> all
+/polymersplitter send <targets> namespace <namespace>
 ```
 
-`rebuild` invokes Polymer's resource-pack generation API. The normal generation-finished hook then runs the same split/cache/publish pipeline; there is no separate rebuild implementation.
+`rebuild` invokes Polymer's resource-pack generation API; the normal generation-finished hook performs split/cache/publication.
+
+### Targeted resource-pack push
+
+The `send` command is a delivery operation only. It requires an active `READY` `SplitGeneration` and a Phase 13-supported local AutoHost provider.
+
+`targets` is Minecraft's standard player selector argument, so one player or multiple players can be selected through vanilla selectors. `all` selects every pack from the current generation in its deterministic order; `namespace <name>` selects exactly one current namespace.
+
+The version-specific AutoHost bridge:
+
+1. resolves the active AutoHost provider and per-player packet context,
+2. checks provider readiness,
+3. calls `ResourcePackDataProvider.createProperties(...)` with the same effective UUID/content SHA-1 used by normal split delivery,
+4. sends Minecraft's resource-pack push packet to each ready target.
+
+Manual push deliberately preserves the generated pack's `isRequired` and prompt fields. It does not force `required=true`, bypass AutoHost policy, regenerate files, or include Polymer global/external packs.
+
+For a primary namespace such as `minecraft`, manual push uses Polymer's main UUID. Other namespaces keep their deterministic namespace UUID, so re-pushing a pack addresses the same client-side resource-pack identity as automatic delivery.
+
+The command reports targeted players, ready players, selected packs, and packet count. Players for whom the provider is not ready are skipped rather than receiving a guessed/unusable URL.
+
 
 ## 16. Version adaptation rules
 
