@@ -30,12 +30,16 @@ public final class PolymerGenerationHook {
 
     private static void split(SplitCoordinator coordinator, Path generatedPack) {
         try {
-            int count = coordinator.process(generatedPack).size();
+            int count = coordinator.process(
+                    generatedPack,
+                    PolymerAutoHostBridge::registerHostedPacks
+            ).size();
+
             LOGGER.log(System.Logger.Level.INFO,
-                    "Split Polymer resource pack into " + count + " namespace pack(s)");
+                    "Split and registered Polymer resource pack into " + count + " namespace pack(s)");
         } catch (Exception e) {
             LOGGER.log(System.Logger.Level.ERROR,
-                    "Failed to split Polymer resource pack; existing split registry was kept", e);
+                    "Failed to split or register Polymer resource pack; existing split registry was kept", e);
         }
     }
 }

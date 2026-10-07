@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 public final class SplitCoordinator {
     private final Path outputRoot;
@@ -45,7 +46,16 @@ public final class SplitCoordinator {
     }
 
     public synchronized List<SplitPack> process(Path generatedPack) throws IOException {
+        return process(generatedPack, packs -> {
+        });
+    }
+
+    public synchronized List<SplitPack> process(
+            Path generatedPack,
+            Consumer<List<SplitPack>> beforePublish
+    ) throws IOException {
         Objects.requireNonNull(generatedPack, "generatedPack");
+        Objects.requireNonNull(beforePublish, "beforePublish");
         markGenerating();
 
         Path normalizedSource = generatedPack.toAbsolutePath().normalize();
@@ -63,12 +73,18 @@ public final class SplitCoordinator {
                 throw new IOException("Generated Polymer resource pack contains no resource namespaces");
             }
 
-            registry.replace(packs);
+            List<SplitPack> immutablePacks = List.copyOf(packs);
+
+            // External publication (for example AutoHost registration) must complete
+            // before the new generation becomes visible to readers.
+            beforePublish.accept(immutablePacks);
+
+            registry.replace(immutablePacks);
             sourcePack.set(normalizedSource);
             sourceHash.set(hash);
             lastFailure.set(null);
             state.set(SplitState.READY);
-            return packs;
+            return immutablePacks;
         } catch (IOException | RuntimeException e) {
             markFailed(e);
             throw e;

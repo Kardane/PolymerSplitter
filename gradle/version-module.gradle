@@ -6,6 +6,7 @@ sourceSets {
     main {
         java.srcDir rootProject.file("versions/shared/src/main/java")
         java.srcDir rootProject.file(adapter_source)
+        java.srcDir rootProject.file(autohost_adapter_source)
         resources.srcDir rootProject.file("versions/shared/src/main/resources")
     }
 }

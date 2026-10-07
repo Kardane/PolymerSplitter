@@ -10,6 +10,7 @@ ext {
     polymer_version = "0.15.2+1.21.11"
     java_version = 21
     adapter_source = "versions/legacy/src/main/java"
+    autohost_adapter_source = "versions/autohost-identifier-legacy/src/main/java"
 }
 
 apply from: rootProject.file("gradle/version-module.gradle")
