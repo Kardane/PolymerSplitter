@@ -16,6 +16,7 @@ sourceSets {
 
 dependencies {
     minecraft "com.mojang:minecraft:${target_minecraft}"
+    implementation "com.google.code.gson:gson:2.11.0"
 
     if (plugins.hasPlugin("net.fabricmc.fabric-loom-remap")) {
         mappings loom.officialMojangMappings()

@@ -28,6 +28,8 @@ Phases 10-14 define the stability work required before the first `0.1.0` release
 
 ## Phase 10 — Resource-pack format completeness
 
+**Status:** completed
+
 **Priority:** highest
 
 Make namespace splitting preserve the semantics of modern resource packs, not only the common `assets/<namespace>/` layout.
@@ -48,6 +50,15 @@ Make namespace splitting preserve the semantics of modern resource packs, not on
 - Overlay paths referenced by `pack.mcmeta` are represented correctly in split packs.
 - Root metadata required by the pack is not silently lost.
 - Unsupported layouts fail safely to Polymer's original main pack.
+
+### Implemented
+
+- Reads declared overlay directories from `pack.mcmeta` without rewriting version-range metadata.
+- Routes base and overlay `assets/<namespace>/...` entries into the same namespace pack.
+- Copies ordinary root-level files into every namespace pack.
+- Omits overlay-local `pack.mcmeta` and `pack.png`, which Minecraft ignores.
+- Rejects undeclared/unknown root directories and unsupported overlay content so the normal Polymer main pack remains the fallback.
+- Includes overlay/shared-root content in namespace fingerprints and bumps the fingerprint schema to invalidate incompatible old cache entries.
 
 ## Phase 11 — Atomic/versioned AutoHost hosting
 

@@ -38,6 +38,7 @@ common/
     SplitState
   pack/
     PackSplitter
+    PackMetadata
     SplitPack
     SplitterConfig
     PackHashUtil
@@ -92,8 +93,9 @@ SplitCoordinator
         v
 PackSplitter
         |
-        +--> read pack.mcmeta / optional pack.png
-        +--> group assets by namespace
+        +--> parse pack.mcmeta overlay directories
+        +--> classify shared root files
+        +--> group base + overlay assets by namespace
         +--> SHA-256 namespace fingerprint
         +--> reuse unchanged ZIP or build deterministic ZIP
         +--> SHA-1 final ZIP
@@ -159,34 +161,41 @@ Given:
 ```text
 pack.mcmeta
 pack.png
+LICENSE.txt
 assets/
   minecraft/**
   polymer/**
-  example/**
+overlay_legacy/
+  assets/
+    minecraft/**
+    polymer/**
 ```
 
-the splitter produces:
+and an `overlays.entries[].directory` value of `overlay_legacy`, the splitter produces:
 
 ```text
 minecraft.zip
   pack.mcmeta
   pack.png
+  LICENSE.txt
   assets/minecraft/**
+  overlay_legacy/assets/minecraft/**
 
 polymer.zip
   pack.mcmeta
   pack.png
+  LICENSE.txt
   assets/polymer/**
-
-example.zip
-  pack.mcmeta
-  pack.png
-  assets/example/**
+  overlay_legacy/assets/polymer/**
 ```
 
-`assets/.mcassetsroot` is assigned to the `minecraft` pack.
+The original `pack.mcmeta` bytes are copied unchanged, so Minecraft remains responsible for deciding which overlay ranges apply to the client version. PolymerSplitter only discovers the declared overlay directories and preserves their namespace resources.
 
-All other root entries are currently ignored except `pack.mcmeta` and optional `pack.png`.
+`assets/.mcassetsroot`, including the same path inside a declared overlay, is assigned to the `minecraft` pack.
+
+Root-level files other than `pack.mcmeta` and `pack.png` are copied into every split pack. Files inside undeclared root directories, or unsupported content inside a declared overlay directory, cause the split generation to fail so Polymer's original main pack remains the fallback.
+
+`pack.mcmeta` and `pack.png` located inside an overlay directory are omitted because Minecraft ignores those files inside overlays.
 
 ## 8. Pack identity
 
@@ -254,9 +263,11 @@ config/polymersplitter/generated/generation-<source-sha1>/
 
 The SHA-256 fingerprint includes:
 
+- a fingerprint schema/version salt,
 - `pack.mcmeta` path and bytes,
 - optional `pack.png` path and bytes,
-- every selected namespace entry path and bytes.
+- every shared root-level file path and bytes,
+- every selected base or overlay namespace entry path and bytes.
 
 A shared metadata change therefore invalidates all namespace fingerprints.
 
@@ -384,6 +395,8 @@ Mixins exist only to suppress Polymer's original main pack. Do not move general 
 The desired failure mode is degradation to normal Polymer behavior, not partial split delivery.
 
 - Invalid/missing Polymer output: split generation fails.
+- Invalid `pack.mcmeta` overlay metadata: split generation fails.
+- Unsupported root/overlay directory content: split generation fails.
 - Empty namespace set: split generation fails.
 - Namespace ZIP failure: whole new generation is not published.
 - AutoHost registration failure: whole new registry is not published.
@@ -397,9 +410,9 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 
 Many Polymer mods contribute resources to `assets/minecraft`. As a result, `minecraft.zip` can remain large even when other namespaces split efficiently.
 
-### Resource-pack overlays and extra root content
+### Conservative handling of unknown pack directories
 
-The current splitter copies `pack.mcmeta` and optionally `pack.png`, and handles `assets/.mcassetsroot`. Other root-level resource-pack content and overlay-directory semantics are not currently redistributed into namespace packs.
+Declared resource-pack overlays are preserved and routed by namespace, and ordinary root-level files are copied to every split pack. Unknown root directories or unsupported files inside an overlay are intentionally rejected instead of guessed. This can cause a valid-but-unrecognized future pack layout to fall back to Polymer's original main pack until explicit support is added.
 
 ### AutoHost hosted-path remapping
 

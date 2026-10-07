@@ -15,9 +15,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -30,6 +32,8 @@ public final class PackSplitter {
     private static final String MCASSETS_ROOT = "assets/.mcassetsroot";
     private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_.-]+");
     private static final LocalDateTime DETERMINISTIC_TIME = LocalDateTime.of(1980, 1, 1, 0, 0);
+    private static final byte[] FINGERPRINT_SCHEMA =
+            "polymersplitter:namespace-fingerprint:v2".getBytes(StandardCharsets.UTF_8);
 
     public List<SplitPack> split(
             Path sourcePack,
@@ -67,12 +71,18 @@ public final class PackSplitter {
                 throw new IOException("Source resource pack is missing " + PACK_META);
             }
 
+            PackMetadata metadata = PackMetadata.read(zip, packMeta);
             ZipEntry packIcon = config.copyPackIcon() ? zip.getEntry(PACK_ICON) : null;
-            Map<String, List<ZipEntry>> byNamespace = collectNamespaceEntries(zip);
-            byte[] sharedFingerprint = fingerprintSharedFiles(zip, packMeta, packIcon);
+            PackLayout layout = collectPackLayout(zip, metadata);
+            byte[] sharedFingerprint = fingerprintSharedFiles(
+                    zip,
+                    packMeta,
+                    packIcon,
+                    layout.sharedRootEntries()
+            );
 
-            List<SplitPack> packs = new ArrayList<>(byNamespace.size());
-            for (Map.Entry<String, List<ZipEntry>> namespaceEntry : byNamespace.entrySet()) {
+            List<SplitPack> packs = new ArrayList<>(layout.byNamespace().size());
+            for (Map.Entry<String, List<ZipEntry>> namespaceEntry : layout.byNamespace().entrySet()) {
                 String namespace = namespaceEntry.getKey();
                 Path target = outputDirectory.resolve(namespace + ".zip");
                 String fingerprint = fingerprintNamespace(
@@ -100,6 +110,7 @@ public final class PackSplitter {
                         zip,
                         packMeta,
                         packIcon,
+                        layout.sharedRootEntries(),
                         namespaceEntry.getValue(),
                         target,
                         config.deterministicZip()
@@ -164,8 +175,13 @@ public final class PackSplitter {
         }
     }
 
-    private static Map<String, List<ZipEntry>> collectNamespaceEntries(ZipFile zip) throws IOException {
+    private static PackLayout collectPackLayout(
+            ZipFile zip,
+            PackMetadata metadata
+    ) throws IOException {
         Map<String, List<ZipEntry>> grouped = new LinkedHashMap<>();
+        List<ZipEntry> sharedRootEntries = new ArrayList<>();
+        Set<String> overlayDirectories = new LinkedHashSet<>(metadata.overlayDirectories());
 
         List<? extends ZipEntry> entries = zip.stream()
                 .filter(entry -> !entry.isDirectory())
@@ -175,39 +191,95 @@ public final class PackSplitter {
         for (ZipEntry entry : entries) {
             String name = validateEntryName(entry.getName());
 
-            if (MCASSETS_ROOT.equals(name)) {
-                grouped.computeIfAbsent("minecraft", ignored -> new ArrayList<>()).add(entry);
+            if (PACK_META.equals(name) || PACK_ICON.equals(name)) {
                 continue;
             }
 
-            if (!name.startsWith(ASSETS_PREFIX)) {
+            if (name.startsWith(ASSETS_PREFIX)) {
+                addAssetEntry(grouped, entry, name);
                 continue;
             }
 
-            String remainder = name.substring(ASSETS_PREFIX.length());
-            int separator = remainder.indexOf('/');
-            if (separator <= 0 || separator == remainder.length() - 1) {
+            int separator = name.indexOf('/');
+            if (separator < 0) {
+                // Preserve root-level metadata/documentation in every split pack.
+                sharedRootEntries.add(entry);
                 continue;
             }
 
-            String namespace = remainder.substring(0, separator);
-            validateNamespace(namespace);
-            grouped.computeIfAbsent(namespace, ignored -> new ArrayList<>()).add(entry);
+            String rootDirectory = name.substring(0, separator);
+            if (!overlayDirectories.contains(rootDirectory)) {
+                throw new IOException(
+                        "Unsupported resource-pack root directory entry: " + name
+                );
+            }
+
+            String overlayRelativePath = name.substring(separator + 1);
+
+            // Minecraft ignores pack.mcmeta and pack.png inside overlay directories.
+            if (PACK_META.equals(overlayRelativePath) || PACK_ICON.equals(overlayRelativePath)) {
+                continue;
+            }
+
+            if (!overlayRelativePath.startsWith(ASSETS_PREFIX)) {
+                throw new IOException(
+                        "Unsupported entry inside overlay '" + rootDirectory + "': " + name
+                );
+            }
+
+            addAssetEntry(grouped, entry, overlayRelativePath);
         }
 
-        return grouped;
+        return new PackLayout(
+                grouped,
+                List.copyOf(sharedRootEntries)
+        );
+    }
+
+    private static void addAssetEntry(
+            Map<String, List<ZipEntry>> grouped,
+            ZipEntry entry,
+            String assetPath
+    ) throws IOException {
+        if (MCASSETS_ROOT.equals(assetPath)) {
+            grouped.computeIfAbsent("minecraft", ignored -> new ArrayList<>()).add(entry);
+            return;
+        }
+
+        if (!assetPath.startsWith(ASSETS_PREFIX)) {
+            throw new IOException("Invalid asset path: " + assetPath);
+        }
+
+        String remainder = assetPath.substring(ASSETS_PREFIX.length());
+        int separator = remainder.indexOf('/');
+
+        if (separator <= 0 || separator == remainder.length() - 1) {
+            throw new IOException("Unsupported resource-pack asset entry: " + assetPath);
+        }
+
+        String namespace = remainder.substring(0, separator);
+        validateNamespace(namespace);
+        grouped.computeIfAbsent(namespace, ignored -> new ArrayList<>()).add(entry);
     }
 
     private static byte[] fingerprintSharedFiles(
             ZipFile zip,
             ZipEntry packMeta,
-            ZipEntry packIcon
+            ZipEntry packIcon,
+            List<ZipEntry> sharedRootEntries
     ) throws IOException {
         MessageDigest digest = sha256Digest();
+        digest.update(FINGERPRINT_SCHEMA);
+        digest.update((byte) 0);
+
         updateDigest(zip, packMeta, PACK_META, digest);
 
         if (packIcon != null && !packIcon.isDirectory()) {
             updateDigest(zip, packIcon, PACK_ICON, digest);
+        }
+
+        for (ZipEntry entry : sharedRootEntries) {
+            updateDigest(zip, entry, validateEntryName(entry.getName()), digest);
         }
 
         return digest.digest();
@@ -273,6 +345,7 @@ public final class PackSplitter {
             ZipFile source,
             ZipEntry packMeta,
             ZipEntry packIcon,
+            List<ZipEntry> sharedRootEntries,
             List<ZipEntry> assetEntries,
             Path target,
             boolean deterministic
@@ -292,8 +365,24 @@ public final class PackSplitter {
                     copyEntry(source, packIcon, PACK_ICON, output, deterministic);
                 }
 
+                for (ZipEntry entry : sharedRootEntries) {
+                    copyEntry(
+                            source,
+                            entry,
+                            validateEntryName(entry.getName()),
+                            output,
+                            deterministic
+                    );
+                }
+
                 for (ZipEntry entry : assetEntries) {
-                    copyEntry(source, entry, validateEntryName(entry.getName()), output, deterministic);
+                    copyEntry(
+                            source,
+                            entry,
+                            validateEntryName(entry.getName()),
+                            output,
+                            deterministic
+                    );
                 }
             }
 
@@ -357,5 +446,11 @@ public final class PackSplitter {
         } catch (AtomicMoveNotSupportedException ignored) {
             Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    private record PackLayout(
+            Map<String, List<ZipEntry>> byNamespace,
+            List<ZipEntry> sharedRootEntries
+    ) {
     }
 }

@@ -19,6 +19,8 @@ PolymerSplitter is a server-only Fabric companion for [Polymer](https://github.c
 Preserve these invariants:
 
 - Split Polymer's final generated resource pack by `assets/<namespace>/`.
+- Preserve declared resource-pack overlays by routing each overlay's `assets/<namespace>/` content into the matching namespace pack.
+- Preserve ordinary root-level files in every split pack; fail safely instead of guessing unknown root-directory semantics.
 - Do not implement a separate HTTP server; hosting and delivery belong to Polymer AutoHost.
 - Vanilla clients must not require PolymerSplitter or another client mod.
 - Keep namespace pack UUIDs stable across content changes.

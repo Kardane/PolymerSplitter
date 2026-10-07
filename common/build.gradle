@@ -6,6 +6,10 @@ base {
     archivesName = "${rootProject.archives_base_name}-common"
 }
 
+dependencies {
+    implementation "com.google.code.gson:gson:2.11.0"
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"
     options.release.set(21)

@@ -4,7 +4,7 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
-**Status:** Phase 9 multi-version support implemented  
+**Status:** Phase 10 resource-pack format completeness implemented  
 **Client mod:** not required
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design and version boundaries.  
