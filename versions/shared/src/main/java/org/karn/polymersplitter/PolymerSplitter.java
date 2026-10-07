@@ -142,11 +142,15 @@ public final class PolymerSplitter implements ModInitializer {
     }
 
     public static boolean shouldUseSplitPacks() {
-        return isEnabled()
-                && coordinator != null
-                && coordinator.snapshot().state() == SplitState.READY
-                && coordinator.snapshot().generation() != null
-                && PolymerAutoHostBridge.currentHostingStatus().supported();
+        if (!isEnabled()
+                || coordinator == null
+                || !PolymerAutoHostBridge.currentHostingStatus().supported()) {
+            return false;
+        }
+
+        var snapshot = coordinator.snapshot();
+        return snapshot.state() == SplitState.READY
+                && snapshot.generation() != null;
     }
 
     public static SplitCoordinator coordinator() {

@@ -47,7 +47,6 @@ common/
     PackMetadata
     SplitPack
     SplitterConfig
-    PackHashUtil
     PackIdUtil
     HostedPackStore
     SplitRecovery
@@ -183,7 +182,7 @@ A newly generated resource-pack generation is published in this order:
 8. Atomically publish one `CoordinatorSnapshot` containing `READY`, the new `SplitGeneration`, cleared failure state, and the computed namespace transition.
 9. Opportunistically clean old generation directories.
 
-If steps 1-4 fail, the previous registry remains intact and the coordinator becomes `FAILED`. Main-pack suppression is active only while the coordinator is `READY` and the registry is non-empty.
+If any publication step before the atomic snapshot update fails, the previous generation remains in the snapshot and the coordinator becomes `FAILED`. Content-addressed AutoHost IDs that were registered before a later failure are unadvertised immutable entries and cannot remap an already issued URL. Main-pack suppression is active only while the coordinator snapshot is `READY` with a non-null generation.
 
 The active `SplitGeneration` contains the source hash, deterministic pack order, and exact namespace map. It is stored inside the same atomic `CoordinatorSnapshot` as the lifecycle state, so readers cannot observe a READY state paired with a different registry generation. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
 
@@ -342,7 +341,7 @@ config/polymersplitter/generated/hosted/<sha1>.zip
 
 The hosted copy is immutable and independent from generation-directory cleanup. Hard links are preferred; ordinary copies are used when hard linking is unavailable.
 
-Cache-index write/cleanup failures do not invalidate an otherwise valid newly generated split generation. Startup cache read/validation failures intentionally prevent cached publication and leave Polymer's main pack as the fallback.
+Cache-index write failure is a publication failure and prevents the new coordinator snapshot from becoming `READY`. Old-generation cleanup failure is best-effort and does not invalidate an otherwise published generation. Startup cache read/verify/repair failure prevents cached publication and leaves Polymer's main pack as the fallback.
 
 ### Interrupted-state cleanup
 
@@ -368,7 +367,7 @@ The AutoHost adapter calls:
 
 This preserves Polymer's configured hosting mode, prompt, required-pack behavior, and resource-pack response handling.
 
-The mod does not send resource-pack packets directly.
+Automatic delivery stays inside Polymer AutoHost's collector/task flow. The explicit `/polymersplitter send` command is the exception: its version adapter sends Minecraft's resource-pack push packet using properties produced by the active AutoHost provider.
 
 ### Hosting compatibility gate
 
@@ -529,7 +528,8 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - Namespace ZIP failure: whole new generation is not published.
 - AutoHost registration failure: whole new registry is not published.
 - Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
-- Cache metadata failure: log/cache degradation only; valid packs remain usable.
+- Cache-index write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
+- Startup cache read/verify/repair failure: cached publication is skipped and Polymer's main pack remains the fallback.
 - Old generation cleanup failure: ignored for delivery purposes.
 - Polymer reports output issues on modern versions: split generation is marked failed.
 
