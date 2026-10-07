@@ -49,11 +49,11 @@ Before changing a Polymer integration point, inspect the matching upstream branc
 ## Repository map
 
 - `common` — splitter, identity, lifecycle snapshots, cache, immutable hosted blobs, provider-independent records.
-- `versions/shared` — Fabric initializer/config plus shared command, hosting/delivery, and publication orchestration.
+- `versions/shared` — Fabric initializer/config plus shared command, hosting/delivery, publication orchestration, common AutoHost internal shim, and main-pack suppression helper.
 - `versions/legacy`, `versions/modern` — generation-event/path adapters only.
-- `versions/autohost-legacy`, `versions/autohost-modern` — packet-context/readiness/provider adapters.
+- `versions/autohost-legacy`, `versions/autohost-modern` — packet-context/readiness/provider adapters only.
 - `versions/pack-id-*` — the `ResourceLocation` / `Identifier` construction boundary.
-- `versions/mixin-*` — original Polymer main-pack suppression only.
+- `versions/mixin-*` — only the version-specific `AbstractProvider#getProperties(...)` injection signature; suppression logic is shared.
 - `versions/commands-*` — permission predicate adapters only.
 - `versions/mc-*` — dependency/version wiring only.
 - `gradle/version-module.gradle` — shared version-module assembly.

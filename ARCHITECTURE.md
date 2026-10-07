@@ -54,11 +54,12 @@ common/
     SplitCacheIndex
 
 versions/
-  shared/                         initializer/config + shared delivery/commands/publication
+  shared/                         initializer/config + shared delivery/commands/publication,
+                                  AutoHost internal shim, suppression helper
   legacy/                         legacy Polymer generation-event/path adapter
   modern/                         modern Polymer generation-event/result adapter
-  autohost-legacy/                PacketTweaker adapter + isolated AutoHost internal shim
-  autohost-modern/                Fabric PacketContext adapter + isolated AutoHost internal shim
+  autohost-legacy/                PacketTweaker context/readiness adapter
+  autohost-modern/                Fabric PacketContext/readiness adapter
   pack-id-resource-location/      ResourceLocation hosted-ID adapter
   pack-id-identifier/             Identifier hosted-ID adapter
   mixin-legacy/                   1.21.x main-pack suppression
@@ -534,7 +535,7 @@ Both delegate actual split publication to shared `SplitPublisher`.
 
 `versions/autohost-modern/AutoHostAccess` owns the corresponding 26.x Fabric networking `PacketContext` boundary plus `RESOURCE_PACKS_READY`.
 
-Both delegate the two unavoidable implementation accesses—AutoHost config inspection and server-stop hosted-map cleanup—to a small `PolymerAutoHostInternals` shim. Normal delivery code does not import `eu.pb4.polymer.autohost.impl.*`.
+Both delegate the two unavoidable implementation accesses—AutoHost config inspection and server-stop hosted-map cleanup—to one shared `PolymerAutoHostInternals` shim. The supported Polymer branches expose the same relevant AutoHost fields, so networking-context adapters no longer duplicate that shim. Normal delivery code does not import `eu.pb4.polymer.autohost.impl.*`.
 
 Identifier construction is independent of the context boundary:
 
@@ -547,7 +548,7 @@ The command tree is shared. `versions/commands-legacy/CommandPermissions` uses t
 
 ### Mixins
 
-Mixins remain version-specific only for original Polymer main-pack suppression. Do not move general integration logic into Mixins.
+The Mixin classes remain version-specific only because `AbstractProvider#getProperties(...)` receives a legacy `Connection` or modern Fabric `PacketContext`. Each Mixin delegates to shared `MainPackSuppression`, which performs the READY/provider gate and removes only the original Polymer main pack by main UUID plus default AutoHost path. Do not move general integration logic into Mixins.
 
 ### Polymer internal API boundary
 
@@ -555,7 +556,7 @@ The audited internal-API inventory and upgrade checklist live in [POLYMER_COMPAT
 
 The current direct implementation dependencies are intentionally limited to:
 
-- `PolymerAutoHostInternals`: `AutoHost.config` and `AutoHost.FILES`, because the reviewed public AutoHost API has no provider-type/config accessor and no hosted-file unregister operation.
+- shared `PolymerAutoHostInternals`: `AutoHost.config` and `AutoHost.FILES`, because the reviewed public AutoHost API has no provider-type/config accessor and no hosted-file unregister operation.
 - `PolymerResourcePackInternals`: `PolymerResourcePackMod.generateAndCall(...)`, plus legacy `useMainPath`; `PolymerResourcePackMod` is explicitly marked `@ApiStatus.Internal` upstream.
 - `AbstractProviderMixin`: the internal `AbstractProvider#getProperties(...)` target, because the public collector API can add packs but cannot remove/replace Polymer's original main pack.
 

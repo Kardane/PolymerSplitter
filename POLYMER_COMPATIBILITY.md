@@ -39,12 +39,13 @@ The supported Polymer branches do not currently expose public equivalents for ev
 
 ### AutoHost configuration and unregister
 
-Files:
+File:
 
 ```text
-versions/autohost-legacy/.../PolymerAutoHostInternals.java
-versions/autohost-modern/.../PolymerAutoHostInternals.java
+versions/shared/.../PolymerAutoHostInternals.java
 ```
+
+The reviewed 1.21.8 through 26.3 Polymer branches expose the same `AutoHost.config`, `AutoHost.FILES`, `config.enabled`, and `config.type` field contracts, so this implementation dependency is shared rather than duplicated by networking context.
 
 Internal Polymer surface:
 
@@ -93,6 +94,7 @@ Files:
 ```text
 versions/mixin-legacy/.../AbstractProviderMixin.java
 versions/mixin-modern/.../AbstractProviderMixin.java
+versions/shared/.../MainPackSuppression.java
 ```
 
 Internal Polymer target:
@@ -106,7 +108,7 @@ Why it remains:
 - The public collector API is additive. It can add split packs but does not expose a public remove/replace hook for Polymer's original monolithic main pack.
 - Suppression must happen after the provider has assembled its final property collection so unrelated global/external packs are preserved.
 
-Keep this Mixin limited to identifying and removing the original Polymer main pack. Do not move general delivery or hosting logic into it.
+The two Mixins exist only because `getProperties(...)` has different legacy/modern context parameters. They delegate the readiness check and original-main-pack identification/removal to shared `MainPackSuppression`. Do not move general delivery or hosting logic into either Mixin or the suppression helper.
 
 ## Alternatives intentionally rejected
 
@@ -123,8 +125,8 @@ When changing the minimum Polymer version or adding a Minecraft/Polymer target:
 1. Check whether public APIs now exist for AutoHost config access, hosted-file unregister, rebuild requests, or final main-pack replacement.
 2. Re-check `PolymerResourcePackMod.generateAndCall(...)` and legacy `useMainPath` signatures/semantics.
 3. Re-check `AbstractProvider#getProperties(...)` signature and return type.
-4. Re-check AutoHost config field names used by the compatibility shim.
+4. Re-check that `AutoHost.config`, `AutoHost.FILES`, `config.enabled`, and `config.type` still share one contract across every supported branch before keeping the shared compatibility shim.
 5. Prefer deleting a compatibility shim when a public upstream API becomes available.
 6. Build `common` and every supported Minecraft target after any compatibility change.
 
-No new direct import from a Polymer `.impl` package should be added outside the compatibility shims or the two documented suppression Mixins without updating this document and `ARCHITECTURE.md`.
+No new direct import from a Polymer `.impl` package should be added outside the compatibility shims or the two version-specific suppression Mixins without updating this document and `ARCHITECTURE.md`.
