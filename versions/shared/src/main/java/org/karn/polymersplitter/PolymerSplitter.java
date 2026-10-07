@@ -54,6 +54,10 @@ public final class PolymerSplitter implements ModInitializer {
         PolymerGenerationHook.register(coordinator);
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> inspectHostingAndRecover());
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            PolymerAutoHostBridge.clearHostedRegistrations();
+            coordinator.resetForServerStop();
+        });
 
         LOGGER.log(System.Logger.Level.INFO,
                 "PolymerSplitter initialized with splitMode=" + config.splitMode());
@@ -75,6 +79,9 @@ public final class PolymerSplitter implements ModInitializer {
             return;
         }
 
+        // Safe at server start before cached state is published. This removes
+        // PolymerSplitter mappings left by a prior server instance in the same JVM.
+        PolymerAutoHostBridge.clearHostedRegistrations();
         recoverStartupState(hosting);
     }
 

@@ -72,6 +72,47 @@ public final class HostedPackStore {
         return Optional.of(target);
     }
 
+    public static Path restoreGenerationFile(
+            Path outputRoot,
+            String sha1,
+            long size,
+            Path target
+    ) throws IOException {
+        Path hosted = findValidBlob(outputRoot, sha1, size)
+                .orElseThrow(() -> new IOException(
+                        "No valid hosted blob is available for SHA-1 " + sha1
+                ));
+
+        Path normalizedTarget = target.toAbsolutePath().normalize();
+        Files.createDirectories(normalizedTarget.getParent());
+
+        Path temp = Files.createTempFile(
+                normalizedTarget.getParent(),
+                "." + normalizedTarget.getFileName(),
+                ".restore"
+        );
+
+        try {
+            Files.deleteIfExists(temp);
+
+            try {
+                Files.createLink(temp, hosted);
+            } catch (IOException | UnsupportedOperationException | SecurityException ignored) {
+                Files.copy(hosted, temp, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            if (!isValidBlob(temp, sha1, size)) {
+                throw new IOException("Restored generation file verification failed: " + target);
+            }
+
+            atomicReplace(temp, normalizedTarget);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+
+        return normalizedTarget;
+    }
+
     private static void ensureBlob(SplitPack pack, Path target) throws IOException {
         if (isValidBlob(target, pack.sha1(), pack.size())) {
             return;

@@ -140,6 +140,12 @@ public final class PolymerAutoHostBridge {
         }
     }
 
+    public static void clearHostedRegistrations() {
+        AutoHost.FILES.keySet().removeIf(
+                path -> path.startsWith(HOST_NAMESPACE + "/" + HOST_PREFIX)
+        );
+    }
+
     public static String fileUrl(
             ResourcePackDataProvider provider,
             PacketContext context,

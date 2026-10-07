@@ -119,7 +119,45 @@ public final class SplitCacheIndex {
             ));
         }
 
+        reconcileGeneration(outputRoot, sourceHash, packs);
         return Optional.of(new Snapshot(sourceHash, List.copyOf(packs)));
+    }
+
+    public static void reconcileGeneration(
+            Path outputRoot,
+            String sourceHash,
+            List<SplitPack> packs
+    ) throws IOException {
+        Path root = outputRoot.toAbsolutePath().normalize();
+        Path generationDirectory = root.resolve("generation-" + sourceHash).normalize();
+        Files.createDirectories(generationDirectory);
+
+        Set<String> expectedFiles = new HashSet<>();
+        for (SplitPack pack : packs) {
+            Path expectedPath = generationDirectory.resolve(pack.namespace() + ".zip").normalize();
+
+            if (!pack.path().toAbsolutePath().normalize().equals(expectedPath)) {
+                throw new IOException(
+                        "Split pack path is not part of the active generation: " + pack.path()
+                );
+            }
+
+            expectedFiles.add(pack.namespace() + ".zip");
+        }
+
+        try (var entries = Files.list(generationDirectory)) {
+            for (Path entry : entries.toList()) {
+                String name = entry.getFileName().toString();
+
+                if (Files.isRegularFile(entry)
+                        && name.endsWith(".zip")
+                        && !expectedFiles.contains(name)) {
+                    Files.deleteIfExists(entry);
+                }
+            }
+        }
+
+        SplitPackManifest.write(generationDirectory, packs);
     }
 
     public static void write(Path outputRoot, String sourceHash, List<SplitPack> packs) throws IOException {
@@ -263,7 +301,12 @@ public final class SplitCacheIndex {
         );
 
         if (hosted.isPresent()) {
-            return hosted.get();
+            return HostedPackStore.restoreGenerationFile(
+                    root,
+                    raw.sha1(),
+                    raw.size(),
+                    indexedPath
+            );
         }
 
         throw new IOException(

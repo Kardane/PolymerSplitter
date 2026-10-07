@@ -6,17 +6,28 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class SplitRegistry {
-    private final AtomicReference<List<SplitPack>> currentPacks = new AtomicReference<>(List.of());
+    private final AtomicReference<SplitGeneration> currentGeneration = new AtomicReference<>();
+
+    public SplitGeneration currentGeneration() {
+        return currentGeneration.get();
+    }
 
     public List<SplitPack> currentPacks() {
-        return currentPacks.get();
+        SplitGeneration generation = currentGeneration.get();
+        return generation == null ? List.of() : generation.packs();
     }
 
     public boolean isEmpty() {
-        return currentPacks.get().isEmpty();
+        return currentGeneration.get() == null;
     }
 
-    public void replace(List<SplitPack> packs) {
-        currentPacks.set(List.copyOf(packs));
+    public NamespaceTransition replace(SplitGeneration generation) {
+        SplitGeneration previous = currentGeneration.getAndSet(generation);
+        return NamespaceTransition.between(previous, generation);
+    }
+
+    public NamespaceTransition clear() {
+        SplitGeneration previous = currentGeneration.getAndSet(null);
+        return NamespaceTransition.between(previous, null);
     }
 }

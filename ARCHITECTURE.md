@@ -36,6 +36,8 @@ common/
     HostingStatus
   lifecycle/
     SplitCoordinator
+    SplitGeneration
+    NamespaceTransition
     SplitRegistry
     SplitState
   pack/
@@ -163,13 +165,21 @@ A newly generated resource-pack generation is published in this order:
 3. Build or reuse all namespace packs.
 4. Materialize every final ZIP into the immutable content-addressed hosted blob store.
 5. Register content-addressed hosted identifiers with Polymer AutoHost.
-6. Atomically replace the in-memory `SplitRegistry` list.
-7. Mark the coordinator `READY`.
-8. Persist cache metadata and opportunistically clean old generation directories.
+6. Reconcile the generation directory to the exact namespace set and rewrite its manifest.
+7. Atomically commit `current-cache.tsv`.
+8. Atomically replace the in-memory `SplitGeneration` snapshot.
+9. Mark the coordinator `READY`.
+10. Opportunistically clean old generation directories.
 
 If steps 1-4 fail, the previous registry remains intact and the coordinator becomes `FAILED`. Main-pack suppression is active only while the coordinator is `READY` and the registry is non-empty.
 
-The registry swap is atomic. Hosted IDs include the content SHA-1, so partial registration before a failed publication can only add unadvertised immutable IDs; it cannot remap an already advertised URL to different bytes.
+The registry stores one immutable `SplitGeneration` containing the source hash, deterministic pack order, and exact namespace map. The swap is atomic. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
+
+Before the registry advances, the generation directory is reconciled so stale namespace ZIPs are removed, the manifest is rewritten from the exact pack set, and the cache index is atomically committed. A cache-index write failure therefore prevents the new generation from becoming `READY`.
+
+`NamespaceTransition` compares the previous and next snapshots and records added, removed, content-changed, and unchanged namespaces. Removed namespaces disappear from the next collector immediately because delivery reads only the current snapshot.
+
+Hosted IDs include the content SHA-1, so partial registration before a failed publication can only add unadvertised immutable IDs; it cannot remap an already advertised URL to different bytes.
 
 ## 7. Split format
 
@@ -302,7 +312,9 @@ A shared metadata change therefore invalidates all namespace fingerprints.
 - expected `<namespace>.zip` file names,
 - actual file size and SHA-1.
 
-If the indexed generation ZIP is missing or corrupted, the corresponding immutable `hosted/<sha1>.zip` may be used as the recovery source when it passes the same size/SHA-1 verification.
+If the indexed generation ZIP is missing or corrupted, the corresponding immutable `hosted/<sha1>.zip` may be used as the recovery source when it passes the same size/SHA-1 verification. Recovery materializes that blob back into the expected `generation-<source-sha1>/<namespace>.zip` path before publication.
+
+The generation directory is then reconciled to the exact cached namespace set and its manifest is rewritten. Extra stale namespace ZIPs under the active generation directory are removed.
 
 The registry is restored only after all cached packs validate and AutoHost registration succeeds. One invalid namespace invalidates the entire startup recovery; partial cached delivery is not published.
 
@@ -487,11 +499,13 @@ Many Polymer mods contribute resources to `assets/minecraft`. As a result, `mine
 
 Declared resource-pack overlays are preserved and routed by namespace, and ordinary root-level files are copied to every split pack. Unknown root directories or unsupported files inside an overlay are intentionally rejected instead of guessed. This can cause a valid-but-unrecognized future pack layout to fall back to Polymer's original main pack until explicit support is added.
 
-### Hosted blob retention
+### Namespace and hosted-entry retirement
 
-Polymer AutoHost exposes registration but no public unregister API in the supported versions. PolymerSplitter therefore does not automatically delete `hosted/<sha1>.zip` blobs after they have been registered.
+Within a running server, historical content-addressed AutoHost mappings and `hosted/<sha1>.zip` blobs are retained so an already issued URL continues to resolve to the same bytes. They are not part of the active namespace set: collectors read only the current `SplitGeneration`.
 
-This intentionally favors URL correctness over automatic disk reclamation: an already issued content-addressed URL continues to resolve to the same bytes even after its generation directory is retired. A later lifecycle/operations phase can add conservative garbage collection once stale hosted identifiers can be tracked safely.
+When the Minecraft server fully stops, PolymerSplitter removes only its own `polymersplitter/packs/*` entries from AutoHost's in-memory hosted-file map and resets its in-memory coordinator/registry to `NOT_STARTED`. Disk cache and immutable hosted blobs remain available for validated recovery on the next server start, including same-JVM restarts.
+
+Automatic disk garbage collection of historical hosted blobs remains deferred to an operational cleanup phase.
 
 ### External provider
 

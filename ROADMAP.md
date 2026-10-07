@@ -170,6 +170,8 @@ Make behavior explicit across Polymer AutoHost provider configurations.
 
 ## Phase 14 — Namespace lifecycle cleanup
 
+**Status:** completed
+
 Handle namespaces appearing and disappearing between generations.
 
 ### Scope
@@ -185,6 +187,20 @@ Handle namespaces appearing and disappearing between generations.
 - Registry, cache, hosted paths, and files describe the same generation.
 - Removed namespaces cannot leak into later delivery.
 - Reintroduced namespaces retain their deterministic identity.
+
+### Implemented
+
+- Active state is represented by one immutable `SplitGeneration` snapshot containing source hash, deterministic pack order, and exact namespace map.
+- Publication computes a `NamespaceTransition` with added, removed, changed, and unchanged namespace sets.
+- Removed namespaces disappear atomically from the active registry and therefore from all subsequent resource-pack collection.
+- The active generation directory is reconciled to the exact namespace set; stale ZIPs are removed and `manifest.json` is rewritten.
+- Missing/corrupted generation ZIPs recovered from immutable hosted blobs are materialized back to their canonical generation paths.
+- `current-cache.tsv` is now a mandatory atomic publication step before the in-memory generation advances.
+- Namespace pack order is deterministic with `minecraft` first and all other namespaces lexicographic.
+- Historical content-addressed AutoHost mappings remain during a running server to protect in-flight URLs, but are not advertised by the current collector.
+- On full server stop, PolymerSplitter-owned AutoHost mappings and in-memory generation state are cleared while disk cache/blob data remains for validated restart recovery.
+- Same-JVM server restarts therefore begin from `NOT_STARTED` and recover the persisted generation instead of retaining stale in-memory state.
+- Deterministic namespace UUID derivation remains unchanged, so a namespace removed and later reintroduced receives the same intrinsic UUID.
 
 ## Phase 15 — `minecraft` namespace optimization
 

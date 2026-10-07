@@ -51,6 +51,14 @@ public final class PolymerSplitterCommands {
             ), false);
         }
 
+        var transition = coordinator.lastTransition();
+        source.sendSuccess(() -> Component.literal(
+                "Namespaces: +" + transition.added().size()
+                        + " -" + transition.removed().size()
+                        + " ~" + transition.changed().size()
+                        + " =" + transition.unchanged().size()
+        ), false);
+
         if (coordinator.sourceHash() != null) {
             source.sendSuccess(() -> Component.literal(
                     "Source SHA-1: " + coordinator.sourceHash()

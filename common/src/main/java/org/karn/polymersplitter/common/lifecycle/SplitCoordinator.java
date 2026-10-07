@@ -25,6 +25,8 @@ public final class SplitCoordinator {
     private final AtomicReference<Path> sourcePack = new AtomicReference<>();
     private final AtomicReference<String> sourceHash = new AtomicReference<>();
     private final AtomicReference<String> lastFailure = new AtomicReference<>();
+    private final AtomicReference<NamespaceTransition> lastTransition =
+            new AtomicReference<>(NamespaceTransition.empty());
 
     public SplitCoordinator(Path outputRoot, SplitterConfig config, SplitRegistry registry) {
         this(outputRoot, config, registry, new PackSplitter());
@@ -59,17 +61,21 @@ public final class SplitCoordinator {
             }
 
             SplitCacheIndex.Snapshot snapshot = cached.get();
-            List<SplitPack> packs = List.copyOf(snapshot.packs());
+            SplitGeneration generation = SplitGeneration.create(
+                    snapshot.sourceHash(),
+                    snapshot.packs()
+            );
 
-            beforePublish.accept(packs);
+            beforePublish.accept(generation.packs());
 
-            registry.replace(packs);
+            NamespaceTransition transition = registry.replace(generation);
             sourcePack.set(null);
-            sourceHash.set(snapshot.sourceHash());
+            sourceHash.set(generation.sourceHash());
             lastFailure.set(null);
+            lastTransition.set(transition);
             state.set(SplitState.READY);
 
-            return Optional.of(packs);
+            return Optional.of(generation.packs());
         } catch (IOException | RuntimeException e) {
             markFailed(e);
             throw e;
@@ -115,29 +121,43 @@ public final class SplitCoordinator {
                 throw new IOException("Generated Polymer resource pack contains no resource namespaces");
             }
 
-            List<SplitPack> immutablePacks = List.copyOf(packs);
+            SplitGeneration generation = SplitGeneration.create(hash, packs);
 
-            // External publication (for example AutoHost registration) must complete
-            // before the new generation becomes visible to readers.
-            beforePublish.accept(immutablePacks);
+            // External publication (for example immutable AutoHost registration) must
+            // complete before persistent/current generation state becomes visible.
+            beforePublish.accept(generation.packs());
 
-            registry.replace(immutablePacks);
+            // The cache index is part of publication state, not best-effort metadata.
+            // It must be atomically committed before the in-memory registry advances.
+            SplitCacheIndex.reconcileGeneration(outputRoot, hash, generation.packs());
+            SplitCacheIndex.write(outputRoot, hash, generation.packs());
+
+            NamespaceTransition transition = registry.replace(generation);
             sourcePack.set(normalizedSource);
             sourceHash.set(hash);
             lastFailure.set(null);
+            lastTransition.set(transition);
             state.set(SplitState.READY);
 
-            persistCacheBestEffort(hash, immutablePacks);
             cleanupOldGenerationsBestEffort(
                     hash,
                     previousCache.map(SplitCacheIndex.Snapshot::sourceHash).orElse(null)
             );
 
-            return immutablePacks;
+            return generation.packs();
         } catch (IOException | RuntimeException e) {
             markFailed(e);
             throw e;
         }
+    }
+
+    public synchronized void resetForServerStop() {
+        NamespaceTransition transition = registry.clear();
+        sourcePack.set(null);
+        sourceHash.set(null);
+        lastFailure.set(null);
+        lastTransition.set(transition);
+        state.set(SplitState.NOT_STARTED);
     }
 
     private Optional<SplitCacheIndex.Snapshot> readCacheBestEffort() {
@@ -148,19 +168,11 @@ public final class SplitCoordinator {
         }
     }
 
-    private void persistCacheBestEffort(String hash, List<SplitPack> packs) {
-        try {
-            SplitCacheIndex.write(outputRoot, hash, packs);
-        } catch (IOException | RuntimeException ignored) {
-            // Cache metadata must never invalidate an otherwise usable split generation.
-        }
-    }
-
     private void cleanupOldGenerationsBestEffort(String currentHash, String previousHash) {
         try {
             SplitCacheIndex.cleanupOldGenerations(outputRoot, currentHash, previousHash);
         } catch (IOException | RuntimeException ignored) {
-            // Old cache cleanup is opportunistic and must not affect pack delivery.
+            // Old generation cleanup is opportunistic and must not affect pack delivery.
         }
     }
 
@@ -196,5 +208,9 @@ public final class SplitCoordinator {
 
     public String lastFailure() {
         return lastFailure.get();
+    }
+
+    public NamespaceTransition lastTransition() {
+        return lastTransition.get();
     }
 }
