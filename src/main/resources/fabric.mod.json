@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "polymersplitter",
+  "version": "${version}",
+  "name": "PolymerSplitter",
+  "description": "Fabric serverside minigame mode template",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "org.karn.polymersplitter.Polymersplitter"
+    ]
+  },
+  "mixins": [
+    "polymersplitter.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
