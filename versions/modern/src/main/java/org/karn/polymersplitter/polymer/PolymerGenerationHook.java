@@ -52,9 +52,9 @@ public final class PolymerGenerationHook {
         try {
             List<SplitPack> packs = coordinator.process(
                     generatedPack,
-                    packs -> PolymerAutoHostBridge.registerHostedPacks(
+                    hostedPacks -> PolymerAutoHostBridge.registerHostedPacks(
                             coordinator.outputRoot(),
-                            packs
+                            hostedPacks
                     )
             );
 
