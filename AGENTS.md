@@ -9,7 +9,8 @@ Read the minimum relevant context before editing:
 1. [README.md](README.md) — user-facing behavior, commands, supported versions.
 2. [ARCHITECTURE.md](ARCHITECTURE.md) — runtime flow, invariants, failure semantics, version boundaries.
 3. [ROADMAP.md](ROADMAP.md) — planned work and completed phase boundaries.
-4. The affected `versions/mc-*/build.gradle` — exact Minecraft, Fabric, Polymer, Java, and adapter selection.
+4. [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md) — audited public/internal Polymer API boundary.
+5. The affected `versions/mc-*/build.gradle` — exact Minecraft, Fabric, Polymer, Java, and adapter selection.
 
 Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, hosting, delivery, compatibility, or failure behavior changes. Keep README user-facing.
 
@@ -28,7 +29,7 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Publish only after hosting, generation reconciliation, and cache-index commit succeed.
 - Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
 - Keep historical hosted URLs valid while a server is running; clear only PolymerSplitter-owned in-memory mappings after full server stop.
-- Prefer public Polymer APIs. Mixins exist only for original-main-pack suppression and should stay minimal.
+- Prefer public Polymer APIs. Direct `.impl` access is allowed only in the compatibility shims and the documented main-pack suppression Mixins listed in `POLYMER_COMPATIBILITY.md`.
 - Do not put Minecraft or Polymer types in `common`.
 
 ## Version boundaries
@@ -73,7 +74,7 @@ Do not start Minecraft, launch a server, or add/run unit, gameplay, functional, 
 ## Change discipline
 
 - Prefer one common implementation plus the smallest necessary version adapter.
-- Verify upstream Polymer/Fabric APIs before widening compatibility or using internal implementation classes.
+- Verify upstream Polymer/Fabric APIs before widening compatibility or changing an internal compatibility shim. Delete a shim when upstream exposes a public equivalent.
 - Do not copy decompiled third-party code.
 - Avoid speculative abstractions; add an adapter only for a real API boundary.
 - Keep documentation cross-linked and remove stale rules instead of accumulating exceptions.

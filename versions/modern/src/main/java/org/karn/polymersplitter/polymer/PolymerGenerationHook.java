@@ -2,7 +2,6 @@ package org.karn.polymersplitter.polymer;
 
 import eu.pb4.polymer.resourcepack.api.OutputGenerator;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
-import eu.pb4.polymer.resourcepack.impl.PolymerResourcePackMod;
 import net.minecraft.commands.CommandSourceStack;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 
@@ -34,12 +33,7 @@ public final class PolymerGenerationHook {
     }
 
     public static void requestRebuild(CommandSourceStack source) {
-        PolymerResourcePackMod.generateAndCall(
-                source.getServer(),
-                false,
-                message -> source.sendSuccess(() -> message, true),
-                ignored -> {
-                }
-        );
+        PolymerResourcePackInternals.requestRebuild(source);
     }
+
 }

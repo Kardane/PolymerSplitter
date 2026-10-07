@@ -2,7 +2,6 @@ package org.karn.polymersplitter.polymer;
 
 import eu.pb4.polymer.autohost.api.AutoHostUtils;
 import eu.pb4.polymer.autohost.api.ResourcePackDataProvider;
-import eu.pb4.polymer.autohost.impl.AutoHost;
 import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import net.minecraft.network.protocol.common.ClientboundResourcePackPushPacket;
 import net.minecraft.server.level.ServerPlayer;
@@ -19,10 +18,7 @@ final class AutoHostAccess {
     }
 
     static AutoHostSettings settings() {
-        if (AutoHost.config == null) {
-            return new AutoHostSettings(false, false, null);
-        }
-        return new AutoHostSettings(true, AutoHost.config.enabled, AutoHost.config.type);
+        return PolymerAutoHostInternals.settings();
     }
 
     static void registerPackCollector(SplitCoordinator coordinator) {
@@ -90,10 +86,6 @@ final class AutoHostAccess {
     }
 
     static void clearHostedRegistrations() {
-        AutoHost.FILES.keySet().removeIf(
-                path -> path.startsWith(
-                        SplitDelivery.HOST_NAMESPACE + "/" + SplitDelivery.HOST_PREFIX
-                )
-        );
+        PolymerAutoHostInternals.clearHostedRegistrations();
     }
 }

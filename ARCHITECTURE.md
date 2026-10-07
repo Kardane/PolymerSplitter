@@ -57,8 +57,8 @@ versions/
   shared/                         initializer/config + shared delivery/commands/publication
   legacy/                         legacy Polymer generation-event/path adapter
   modern/                         modern Polymer generation-event/result adapter
-  autohost-legacy/                PacketTweaker context/readiness adapter
-  autohost-modern/                Fabric PacketContext/readiness adapter
+  autohost-legacy/                PacketTweaker adapter + isolated AutoHost internal shim
+  autohost-modern/                Fabric PacketContext adapter + isolated AutoHost internal shim
   pack-id-resource-location/      ResourceLocation hosted-ID adapter
   pack-id-identifier/             Identifier hosted-ID adapter
   mixin-legacy/                   1.21.x main-pack suppression
@@ -488,17 +488,19 @@ Version-specific source now contains only actual upstream API boundaries. Shared
 
 ### Generation adapters
 
-`versions/legacy/PolymerGenerationHook` handles Runnable-style completion events, legacy generated-pack path resolution, and the legacy rebuild callback signature.
+`versions/legacy/PolymerGenerationHook` handles Runnable-style completion events. Its unavoidable internal rebuild trigger and legacy generated-output-path fallback are isolated in `PolymerResourcePackInternals`.
 
-`versions/modern/PolymerGenerationHook` handles `OutputGenerator.Result`, `hadIssues()`, and the modern rebuild callback signature.
+`versions/modern/PolymerGenerationHook` handles `OutputGenerator.Result` and `hadIssues()`. Its unavoidable internal rebuild trigger is isolated in `PolymerResourcePackInternals`.
 
 Both delegate actual split publication to shared `SplitPublisher`.
 
 ### AutoHost adapters
 
-`versions/autohost-legacy/AutoHostAccess` is shared by 1.21.8 through 1.21.11 and owns PacketTweaker `PacketContext`, legacy provider readiness, collector property creation, packet push, and the current internal AutoHost config/file-map access.
+`versions/autohost-legacy/AutoHostAccess` is shared by 1.21.8 through 1.21.11 and owns PacketTweaker `PacketContext`, legacy provider readiness, collector property creation, and packet push.
 
 `versions/autohost-modern/AutoHostAccess` owns the corresponding 26.x Fabric networking `PacketContext` boundary plus `RESOURCE_PACKS_READY`.
+
+Both delegate the two unavoidable implementation accesses—AutoHost config inspection and server-stop hosted-map cleanup—to a small `PolymerAutoHostInternals` shim. Normal delivery code does not import `eu.pb4.polymer.autohost.impl.*`.
 
 Identifier construction is independent of the context boundary:
 
@@ -512,6 +514,18 @@ The command tree is shared. `versions/commands-legacy/CommandPermissions` uses t
 ### Mixins
 
 Mixins remain version-specific only for original Polymer main-pack suppression. Do not move general integration logic into Mixins.
+
+### Polymer internal API boundary
+
+The audited internal-API inventory and upgrade checklist live in [POLYMER_COMPATIBILITY.md](POLYMER_COMPATIBILITY.md).
+
+The current direct implementation dependencies are intentionally limited to:
+
+- `PolymerAutoHostInternals`: `AutoHost.config` and `AutoHost.FILES`, because the reviewed public AutoHost API has no provider-type/config accessor and no hosted-file unregister operation.
+- `PolymerResourcePackInternals`: `PolymerResourcePackMod.generateAndCall(...)`, plus legacy `useMainPath`; `PolymerResourcePackMod` is explicitly marked `@ApiStatus.Internal` upstream.
+- `AbstractProviderMixin`: the internal `AbstractProvider#getProperties(...)` target, because the public collector API can add packs but cannot remove/replace Polymer's original main pack.
+
+Public `PolymerResourcePackUtils.buildMain(...)` was not substituted for `generateAndCall(...)`: it does not provide the same generation lock, async execution, messaging, and callback orchestration. Reflection and direct parsing of Polymer's config file are also intentionally avoided because they reduce compile-time safety or duplicate upstream behavior without removing runtime coupling.
 
 
 ## 17. Failure semantics
