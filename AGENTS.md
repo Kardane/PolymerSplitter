@@ -80,4 +80,4 @@ Do not start Minecraft, launch a server, or add/run unit, gameplay, functional, 
 - Verify upstream Polymer/Fabric APIs before widening compatibility or changing an internal compatibility shim. Delete a shim when upstream exposes a public equivalent.
 - Do not copy decompiled third-party code.
 - Avoid speculative abstractions; add an adapter only for a real API boundary.
-- Keep documentation cross-linked and remove stale rules instead of accumulating exceptions.
+- Keep documentation cross-linked and remove stale rules instead of accumulating exceptions. `ARCHITECTURE.md` is the current implementation source of truth; ROADMAP completed-phase notes must not describe superseded storage/cache behavior as current.

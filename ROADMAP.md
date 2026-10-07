@@ -2,7 +2,7 @@
 
 This document tracks development after the Phase 1-9 implementation baseline.
 
-The immediate goal is to reach a reliable first release candidate before adding more aggressive splitting or optimization features.
+Phases 10-14 are complete. The current runtime/storage architecture is defined by [ARCHITECTURE.md](ARCHITECTURE.md); completed-phase notes below describe the capability delivered by each phase and are kept aligned with the current implementation after later refactors.
 
 ## Release boundary
 
@@ -89,11 +89,10 @@ Eliminate the online rebuild race caused by stable hosted identifiers being rema
 
 - AutoHost identifiers are content-addressed as `packs/<namespace>/<sha1>`.
 - Namespace/Minecraft pack UUIDs remain stable and independent from the hosted identifier.
-- Final ZIPs are verified and materialized into immutable `generated/hosted/<sha1>.zip` blobs before AutoHost registration.
-- Hosted blobs prefer hard links and fall back to copies.
-- All blobs are materialized before new AutoHost IDs are registered.
-- Generation-directory cleanup can retire old generations without invalidating issued URLs.
-- Hosted blobs are intentionally retained because supported Polymer AutoHost versions do not expose a public unregister API; safe garbage collection is deferred to later lifecycle/operations work.
+- `generated/hosted/<sha1>.zip` is the single persistent ZIP store; changed namespace ZIPs are committed atomically to that path and unchanged compatible blobs are reused in place.
+- All current blobs exist before their AutoHost IDs are registered.
+- Historical blobs and mappings are retained for the lifetime of a running server so issued URLs never remap to different bytes.
+- After a later successful startup restore, unreferenced prior-process blobs may be garbage-collected best-effort; in-memory PolymerSplitter mappings are cleared on full server stop.
 
 ## Phase 12 — Recovery and cache restore
 
@@ -103,7 +102,7 @@ Make a valid previous split generation recoverable across server restarts and in
 
 ### Scope
 
-- Restore a valid registry from `current-cache.tsv` when possible.
+- Restore a valid persisted split generation when possible.
 - Verify cached file existence, size, SHA-1, and metadata before reuse.
 - Clean abandoned temporary files from interrupted generation.
 - Recover cleanly from:
@@ -121,15 +120,13 @@ Make a valid previous split generation recoverable across server restarts and in
 
 ### Implemented
 
-- Startup reads and fully validates `current-cache.tsv` before publishing any cached state.
-- Namespace, fingerprint, SHA-1, UUID, size, generation path, and file name metadata are validated.
-- Cached ZIP bytes are verified by size and SHA-1.
-- If the generation ZIP is missing/corrupted, a valid immutable `hosted/<sha1>.zip` is accepted as the recovery source.
-- All recovered hosted blobs/AutoHost IDs are prepared before the split registry becomes `READY`.
-- Any invalid cached namespace rejects the entire startup restore and preserves Polymer main-pack fallback.
+- Startup reads format-3 `index.json`, requires output-compatibility metadata to match, and verifies every referenced `hosted/<sha1>.zip` by size and SHA-1 before publication.
+- Missing or output-incompatible caches are cache misses; malformed or corrupted compatible caches never publish partial state.
+- A compatible verified cache can restore the entire generation across restart without recompression.
+- Older format-2 indexes are readable only as incompatible metadata and are never relabeled as current output.
+- Legacy `current-cache.tsv` data may import validated ZIP bytes into the immutable hosted store, but cannot become current without a successful generation under current compatibility settings.
 - Owned temporary files from interrupted writes are removed on startup.
-- Non-current generation directories without a completed manifest are removed as incomplete.
-- A recovered pack can be reused by the next generation without recompression when its namespace fingerprint is unchanged.
+- Compatible unchanged namespaces can reuse verified hosted blobs without recompression.
 
 ## Phase 13 — AutoHost configuration hardening
 
@@ -190,16 +187,14 @@ Handle namespaces appearing and disappearing between generations.
 
 ### Implemented
 
-- Active state is represented by one immutable `SplitGeneration` snapshot containing source hash, deterministic pack order, and exact namespace map.
+- Runtime state is published as one immutable `CoordinatorSnapshot` containing lifecycle state, active `SplitGeneration`, failure state, and the namespace transition; `SplitRegistry` is a read-only view of that same snapshot.
 - Publication computes a `NamespaceTransition` with added, removed, changed, and unchanged namespace sets.
-- Removed namespaces disappear atomically from the active registry and therefore from all subsequent resource-pack collection.
-- The active generation directory is reconciled to the exact namespace set; stale ZIPs are removed and `manifest.json` is rewritten.
-- Missing/corrupted generation ZIPs recovered from immutable hosted blobs are materialized back to their canonical generation paths.
-- `current-cache.tsv` is now a mandatory atomic publication step before the in-memory generation advances.
+- Removed namespaces disappear atomically from the active generation and therefore from all subsequent resource-pack collection.
+- Format-3 `index.json` is the atomic durable pointer to the exact current namespace set and its immutable hosted blobs.
 - Namespace pack order is deterministic with `minecraft` first and all other namespaces lexicographic.
 - Historical content-addressed AutoHost mappings remain during a running server to protect in-flight URLs, but are not advertised by the current collector.
-- On full server stop, PolymerSplitter-owned AutoHost mappings and in-memory generation state are cleared while disk cache/blob data remains for validated restart recovery.
-- Same-JVM server restarts therefore begin from `NOT_STARTED` and recover the persisted generation instead of retaining stale in-memory state.
+- On full server stop, PolymerSplitter-owned AutoHost mappings and in-memory state are cleared while `index.json` and hosted blobs remain for validated restart recovery.
+- Same-JVM server restarts therefore begin from `NOT_STARTED` instead of retaining stale in-memory state.
 - Deterministic namespace UUID derivation remains unchanged, so a namespace removed and later reintroduced receives the same intrinsic UUID.
 
 ## Phase 15 — `minecraft` namespace optimization
@@ -255,11 +250,16 @@ small-namespaces.zip
 
 Optimize generation after correctness and lifecycle behavior are stable.
 
-### Scope
+### Already completed
 
-- Reduce duplicate ZIP reads between fingerprinting and compression.
+- Whole-source unchanged fast path skips namespace enumeration, fingerprinting, compression, and index rewrite when source SHA-1, output compatibility, and all hosted blobs verify.
+- Newly written namespace ZIPs compute final SHA-1 in-stream instead of rereading the completed temporary ZIP solely for hashing.
+- One reusable 64 KiB I/O buffer is shared across fingerprint reads and ZIP-entry copies within a split invocation.
+
+### Remaining scope
+
+- Reduce duplicate source-ZIP reads between namespace fingerprinting and compression where this can be done without whole-file buffering.
 - Consider bounded parallel namespace compression.
-- Keep memory bounded and streaming-based.
 - Add generation timing metrics.
 - Add cache hit/miss counts.
 - Measure large-pack behavior before choosing concurrency defaults.
@@ -300,11 +300,12 @@ Candidates:
 Potential status additions:
 
 - cache hits/misses,
-- current generation directory,
+- current index/source SHA-1,
+- hosted blob count/bytes,
 - source pack size,
 - split generation duration,
 - hosting mode,
-- previous generation retained.
+- last namespace transition.
 
 Commands must continue to use Polymer's generation lifecycle rather than implementing a parallel resource-pack pipeline.
 

@@ -56,8 +56,8 @@ eu.pb4.polymer.autohost.impl.AutoHost.FILES
 
 Why it remains:
 
-- There is no public AutoHost config/provider-type accessor. Phase 13 needs the configured provider type to reject `external`, `empty`, disabled, and unknown providers instead of advertising split URLs that may not be served.
-- `AutoHostUtils.registerHostedFile(...)` is public, but no matching public unregister/clear API exists in the reviewed branches. Phase 14 uses cleanup only after full server stop.
+- There is no public AutoHost config/provider-type accessor. PolymerSplitter needs the configured provider type to reject `external`, `empty`, disabled, and unknown providers instead of advertising split URLs that may not be served.
+- `AutoHostUtils.registerHostedFile(...)` is public, but no matching public unregister/clear API exists in the reviewed branches. PolymerSplitter therefore removes only its own in-memory hosted mappings after full server stop.
 
 Do not read `AutoHost.config` or mutate `AutoHost.FILES` anywhere else.
 

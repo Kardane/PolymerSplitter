@@ -4,11 +4,11 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
-**Status:** Phase 14 stability baseline + targeted split-pack push command  
+**Status:** pre-0.1.0 development; Phase 10-14 stability baseline complete  
 **Client mod:** not required
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design and version boundaries.  
-See [ROADMAP.md](ROADMAP.md) for the next development phases. Phases 10-14 form the current first-release stability baseline.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the current runtime, cache/storage model, and version boundaries.  
+See [ROADMAP.md](ROADMAP.md) for planned development after the stability baseline.
 
 ## Supported versions
 
@@ -63,6 +63,18 @@ The send command re-pushes the current `READY` split generation; it does not reb
 ## Configuration
 
 The configuration file is created at `config/polymersplitter.json`.
+
+```json
+{
+  "enabled": true,
+  "splitMode": "namespace",
+  "copyPackIcon": true,
+  "deterministicZip": true,
+  "logPackSizes": true
+}
+```
+
+Only `namespace` split mode is currently supported. Changing output-affecting options such as `copyPackIcon` or `deterministicZip` invalidates cache reuse rather than reusing ZIPs produced under different settings.
 
 ## Build
 

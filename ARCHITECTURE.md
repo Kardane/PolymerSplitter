@@ -98,37 +98,35 @@ SplitPublisher (shared)
         v
 SplitCoordinator
         |
-        +--> SHA-1 of full Polymer output
+        +--> validate final Polymer ZIP
+        +--> SHA-1 full source ZIP
+        +--> read index.json + output-compatibility gate
+        +--> verify referenced hosted blobs
         |
-        +--> load previous SplitCacheIndex
+        +--> unchanged source + compatible verified index
+        |       |
+        |       +--> reuse whole SplitGeneration
+        |       +--> re-register hosted IDs
+        |       +--> publish CoordinatorSnapshot READY
         |
-        v
-PackSplitter
-        |
-        +--> parse pack.mcmeta overlay directories
-        +--> classify shared root files
-        +--> group base + overlay assets by namespace
-        +--> SHA-256 namespace fingerprint
-        +--> reuse unchanged ZIP or build deterministic ZIP
-        +--> SHA-1 final ZIP
-        +--> write manifest.json
-        |
-        v
-HostedPackStore
-        |
-        +--> verify final ZIP SHA-1
-        +--> hard-link/copy immutable hosted/<sha1>.zip
-        |
-        v
-PolymerAutoHostBridge.registerHostedPacks
-        |
-        v
-CoordinatorSnapshot atomic publish
-        |
-        +--> state = READY
-        +--> generation = SplitGeneration
-        +--> lastFailure = null
-        +--> NamespaceTransition
+        +--> otherwise PackSplitter
+                |
+                +--> parse pack.mcmeta overlays/root files
+                +--> group base + overlay assets by namespace
+                +--> SHA-256 namespace fingerprints
+                +--> reuse compatible unchanged hosted blobs
+                +--> write changed ZIPs directly into hosted/ temp files
+                +--> SHA-1 changed ZIPs while writing
+                +--> atomic hosted/<sha1>.zip commit
+                |
+                v
+        PolymerAutoHostBridge.registerHostedPacks
+                |
+                v
+        atomic index.json commit
+                |
+                v
+        CoordinatorSnapshot READY
         |
         v
 SplitRegistry read-only view
@@ -139,7 +137,7 @@ SEND_RESOURCE_PACK_COLLECTOR
         +--> ServerResourcePackInfo per namespace
         |
         v
-AbstractProviderMixin removes original Polymer main pack
+AbstractProviderMixin -> MainPackSuppression
         |
         v
 Polymer AutoHost / AutoHostTask
@@ -157,9 +155,11 @@ The split lifecycle is:
 ```text
 NOT_STARTED
     |
-    +--> validated startup cache --> READY
+    +--> compatible + verified startup cache --> READY
     |
-    +--> invalid startup cache --> FAILED
+    +--> missing/incompatible cache --> NOT_STARTED
+    |
+    +--> malformed/invalid compatible cache --> FAILED
     |
     v
 GENERATING
@@ -171,14 +171,25 @@ GENERATING
 
 At server start, after Polymer AutoHost has loaded its actual configuration/provider, PolymerSplitter classifies the provider. Startup cache restore runs only for explicitly supported local providers. It removes owned temporary files, reads `index.json`, requires an exact output-compatibility match, verifies every referenced immutable hosted blob, registers content-addressed AutoHost IDs, and only then publishes the recovered snapshot as `READY`. Missing or output-incompatible cache metadata is a cache miss and does not become active. Integrity failure in a compatible cache prevents cached publication and leaves Polymer's main pack as the fallback.
 
-A newly generated resource-pack generation is published in this order:
+A generated Polymer resource pack follows one of two publication paths.
 
-1. Validate the generated Polymer ZIP.
-2. Calculate its SHA-1.
-3. Build or reuse all namespace packs.
-4. Materialize every final ZIP into the immutable content-addressed hosted blob store.
-5. Register content-addressed hosted identifiers with Polymer AutoHost.
-6. Atomically commit `index.json`, which points only at immutable `hosted/<sha1>.zip` blobs.
+For a whole-source fast-path hit:
+
+1. Validate the generated Polymer ZIP and calculate its SHA-1.
+2. Read a compatible `index.json` and verify every referenced hosted blob.
+3. Require the cached source SHA-1 to match the generated source SHA-1.
+4. Re-register the existing content-addressed hosted identifiers with Polymer AutoHost.
+5. Atomically publish one `CoordinatorSnapshot` containing `READY` and the verified cached generation.
+6. Do not run `PackSplitter` and do not rewrite `index.json`.
+
+For a changed or non-reusable source:
+
+1. Validate the generated Polymer ZIP and calculate its SHA-1.
+2. Load only a compatible, fully verified previous index as a namespace-reuse candidate.
+3. Build changed namespace packs directly into temporary files under `hosted/`; unchanged compatible namespaces reuse their existing immutable blobs.
+4. Atomically commit changed blobs as `hosted/<sha1>.zip`.
+5. Register every current content-addressed hosted identifier with Polymer AutoHost.
+6. Atomically commit format-3 `index.json`.
 7. Atomically publish one `CoordinatorSnapshot` containing `READY`, the new `SplitGeneration`, cleared failure state, and the computed namespace transition.
 8. Best-effort cleanup may remove legacy TSV/generation artifacts, but runtime historical hosted blobs are retained.
 
@@ -379,7 +390,7 @@ Historical content-addressed blobs are retained for the entire running server so
 
 After a later server start successfully restores the current `index.json`, blobs not referenced by that index are safe to remove because prior-process AutoHost mappings have been cleared. Cleanup is best-effort and never changes the active index.
 
-Interrupted temporary files are removed on startup. Legacy generation directories and `current-cache.tsv` are cleanup-only artifacts after format-2 index commit.
+Interrupted temporary files are removed on startup. Legacy generation directories and `current-cache.tsv` are cleanup-only artifacts after a current format-3 index has been committed.
 
 
 ## 11. Polymer AutoHost integration
@@ -577,7 +588,7 @@ The desired failure mode is degradation to normal Polymer behavior, not partial 
 - Unsupported root/overlay directory content: split generation fails.
 - Empty namespace set: split generation fails.
 - Namespace ZIP failure: whole new generation is not published.
-- AutoHost registration failure: whole new registry is not published.
+- AutoHost registration failure: the candidate generation is not published.
 - Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
 - `index.json` write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
 - Compatible-cache integrity verification failure during startup restore: cached publication is skipped and Polymer's main pack remains the fallback.
