@@ -29,7 +29,7 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Cache reuse/publication requires an explicit output-compatibility match: split algorithm version + `copyPackIcon` + `deterministicZip`. Diagnostic settings such as `logPackSizes` are not output compatibility.
 - Whole-source fast reuse is allowed only when source SHA-1 matches a compatible, fully verified index. It may skip splitting/fingerprinting/index rewrite, but must still complete hosted registration before publishing READY.
 - Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Incompatible or metadata-free old caches are cache misses, not current output. Mutation belongs only to generation, legacy blob import, or explicit cleanup.
-- Publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed.
+- For changed-source publication, publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed. Whole-source fast reuse may skip the rewrite only when the existing compatible index and every referenced blob have already verified.
 - Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
 - Keep historical hosted blobs/URLs valid while a server is running. Garbage-collect unreferenced blobs only after a successful startup restore or another explicitly safe lifecycle point.
 - Prefer public Polymer APIs. Direct `.impl` access is allowed only in the compatibility shims and the documented main-pack suppression Mixins listed in `POLYMER_COMPATIBILITY.md`.

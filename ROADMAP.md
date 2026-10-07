@@ -250,7 +250,7 @@ small-namespaces.zip
 
 Optimize generation after correctness and lifecycle behavior are stable.
 
-### Already completed
+### Partial optimization work already completed during refactoring
 
 - Whole-source unchanged fast path skips namespace enumeration, fingerprinting, compression, and index rewrite when source SHA-1, output compatibility, and all hosted blobs verify.
 - Newly written namespace ZIPs compute final SHA-1 in-stream instead of rereading the completed temporary ZIP solely for hashing.

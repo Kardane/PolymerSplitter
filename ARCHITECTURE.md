@@ -197,7 +197,7 @@ If any publication step before the atomic snapshot update fails, the previous ge
 
 The active `SplitGeneration` contains the source hash, deterministic pack order, and exact namespace map. It is stored inside the same atomic `CoordinatorSnapshot` as the lifecycle state, so readers cannot observe a READY state paired with a different registry generation. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
 
-Before the coordinator advances, every current namespace already resolves to an immutable content-addressed blob and `index.json` is atomically committed. An index write failure therefore prevents the new generation from becoming `READY`. No persistent generation-directory copy or manifest is created.
+Before the coordinator advances, every current namespace must resolve to a verified immutable content-addressed blob. A changed-source publication atomically commits `index.json` before the snapshot advances; a whole-source fast-path hit instead relies on the already-verified existing index and does not rewrite it. An index write failure on the changed-source path prevents the new generation from becoming `READY`. No persistent generation-directory copy or manifest is created.
 
 `NamespaceTransition` compares the previous and next snapshots and records added, removed, content-changed, and unchanged namespaces. Removed namespaces disappear from the next collector immediately because delivery reads only the current snapshot.
 
