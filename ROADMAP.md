@@ -97,6 +97,8 @@ Eliminate the online rebuild race caused by stable hosted identifiers being rema
 
 ## Phase 12 — Recovery and cache restore
 
+**Status:** completed
+
 Make a valid previous split generation recoverable across server restarts and interrupted rebuilds.
 
 ### Scope
@@ -116,6 +118,18 @@ Make a valid previous split generation recoverable across server restarts and in
 - Valid cached generations survive a restart without unnecessary recompression.
 - Broken cache state cannot cause partial split delivery.
 - Interrupted writes do not poison future startup.
+
+### Implemented
+
+- Startup reads and fully validates `current-cache.tsv` before publishing any cached state.
+- Namespace, fingerprint, SHA-1, UUID, size, generation path, and file name metadata are validated.
+- Cached ZIP bytes are verified by size and SHA-1.
+- If the generation ZIP is missing/corrupted, a valid immutable `hosted/<sha1>.zip` is accepted as the recovery source.
+- All recovered hosted blobs/AutoHost IDs are prepared before the split registry becomes `READY`.
+- Any invalid cached namespace rejects the entire startup restore and preserves Polymer main-pack fallback.
+- Owned temporary files from interrupted writes are removed on startup.
+- Non-current generation directories without a completed manifest are removed as incomplete.
+- A recovered pack can be reused by the next generation without recompression when its namespace fingerprint is unchanged.
 
 ## Phase 13 — AutoHost configuration hardening
 

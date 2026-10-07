@@ -6,6 +6,7 @@ import org.karn.polymersplitter.command.PolymerSplitterCommands;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 import org.karn.polymersplitter.common.lifecycle.SplitRegistry;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
+import org.karn.polymersplitter.common.pack.SplitRecovery;
 import org.karn.polymersplitter.config.PolymerSplitterConfig;
 import org.karn.polymersplitter.polymer.PolymerAutoHostBridge;
 import org.karn.polymersplitter.polymer.PolymerGenerationHook;
@@ -50,8 +51,61 @@ public final class PolymerSplitter implements ModInitializer {
         PolymerAutoHostBridge.registerPackCollector(coordinator);
         PolymerGenerationHook.register(coordinator);
 
+        recoverStartupState();
+
         LOGGER.log(System.Logger.Level.INFO,
                 "PolymerSplitter initialized with splitMode=" + config.splitMode());
+    }
+
+    private static void recoverStartupState() {
+        try {
+            int deletedTemps = SplitRecovery.cleanupTemporaryFiles(coordinator.outputRoot());
+            if (deletedTemps > 0) {
+                LOGGER.log(System.Logger.Level.INFO,
+                        "Removed " + deletedTemps + " interrupted temporary file(s)");
+            }
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "Failed to clean interrupted PolymerSplitter temporary files", e);
+        }
+
+        String restoredHash = null;
+
+        try {
+            var restored = coordinator.restore(
+                    packs -> PolymerAutoHostBridge.registerHostedPacks(
+                            coordinator.outputRoot(),
+                            packs
+                    )
+            );
+
+            if (restored.isPresent()) {
+                restoredHash = coordinator.sourceHash();
+                LOGGER.log(System.Logger.Level.INFO,
+                        "Restored cached split generation: packs=" + restored.get().size()
+                                + ", sourceSha1=" + restoredHash);
+            }
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "Cached split generation could not be restored; Polymer main pack remains the fallback",
+                    e);
+        }
+
+        try {
+            int deletedGenerations = SplitRecovery.cleanupIncompleteGenerations(
+                    coordinator.outputRoot(),
+                    restoredHash
+            );
+
+            if (deletedGenerations > 0) {
+                LOGGER.log(System.Logger.Level.INFO,
+                        "Removed " + deletedGenerations + " incomplete generation director"
+                                + (deletedGenerations == 1 ? "y" : "ies"));
+            }
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "Failed to clean incomplete PolymerSplitter generations", e);
+        }
     }
 
     public static boolean isEnabled() {

@@ -44,6 +44,7 @@ common/
     PackHashUtil
     PackIdUtil
     HostedPackStore
+    SplitRecovery
     SplitPackManifest
     SplitCacheIndex
 
@@ -139,6 +140,10 @@ Vanilla client
 ```text
 NOT_STARTED
     |
+    +--> validated startup cache --> READY
+    |
+    +--> invalid startup cache --> FAILED
+    |
     v
 GENERATING
     |
@@ -147,7 +152,9 @@ GENERATING
     +--> failure --> FAILED
 ```
 
-A generation is published in this order:
+At startup, PolymerSplitter first removes owned temporary files, validates `current-cache.tsv`, verifies every cached split ZIP, rebuilds/validates immutable hosted blobs, registers their content-addressed AutoHost IDs, and only then publishes the recovered registry as `READY`. If cache recovery fails, the registry remains unpublished and Polymer's main pack remains the fallback.
+
+A newly generated resource-pack generation is published in this order:
 
 1. Validate the generated Polymer ZIP.
 2. Calculate its SHA-1.
@@ -279,9 +286,27 @@ The SHA-256 fingerprint includes:
 
 A shared metadata change therefore invalidates all namespace fingerprints.
 
+### Cache validation and recovery
+
+`SplitCacheIndex.read(...)` is a validated read, not a metadata-only parse. It verifies:
+
+- cache format and source SHA-1 syntax,
+- unique and valid namespaces,
+- SHA-256 fingerprint syntax,
+- final ZIP SHA-1 syntax,
+- deterministic namespace UUIDs,
+- non-negative sizes,
+- generation-relative pack paths,
+- expected `<namespace>.zip` file names,
+- actual file size and SHA-1.
+
+If the indexed generation ZIP is missing or corrupted, the corresponding immutable `hosted/<sha1>.zip` may be used as the recovery source when it passes the same size/SHA-1 verification.
+
+The registry is restored only after all cached packs validate and AutoHost registration succeeds. One invalid namespace invalidates the entire startup recovery; partial cached delivery is not published.
+
 ### Reuse
 
-If namespace and fingerprint match a previous cached pack and the previous file still has the expected size:
+If namespace and fingerprint match a validated previous cached pack:
 
 1. Reuse its SHA-1 and size.
 2. Materialize it into the new generation using a hard link.
@@ -299,7 +324,11 @@ config/polymersplitter/generated/hosted/<sha1>.zip
 
 The hosted copy is immutable and independent from generation-directory cleanup. Hard links are preferred; ordinary copies are used when hard linking is unavailable.
 
-Cache-index read/write/cleanup failures do not invalidate an otherwise valid split generation.
+Cache-index write/cleanup failures do not invalidate an otherwise valid newly generated split generation. Startup cache read/validation failures intentionally prevent cached publication and leave Polymer's main pack as the fallback.
+
+### Interrupted-state cleanup
+
+Startup recovery removes only temporary files owned by PolymerSplitter (cache, manifest, namespace ZIP/reuse, and hosted-blob temp files). It also removes non-current `generation-<sha1>` directories that have no completed `manifest.json`. Complete non-current generations are left to the normal retention lifecycle.
 
 ## 11. Polymer AutoHost integration
 
@@ -415,6 +444,9 @@ Mixins exist only to suppress Polymer's original main pack. Do not move general 
 The desired failure mode is degradation to normal Polymer behavior, not partial split delivery.
 
 - Invalid/missing Polymer output: split generation fails.
+- Missing/malformed startup cache metadata: cached publication is skipped.
+- Any cached namespace with an invalid path, UUID, size, SHA-1, or missing valid generation/hosted file invalidates the entire startup restore.
+- Interrupted temporary files and incomplete non-current generation directories are cleaned on startup on a best-effort basis.
 - Invalid `pack.mcmeta` overlay metadata: split generation fails.
 - Unsupported root/overlay directory content: split generation fails.
 - Empty namespace set: split generation fails.

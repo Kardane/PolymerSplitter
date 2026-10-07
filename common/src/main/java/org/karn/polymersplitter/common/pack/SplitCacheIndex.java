@@ -18,6 +18,9 @@ import java.util.regex.Pattern;
 public final class SplitCacheIndex {
     private static final String FILE_NAME = "current-cache.tsv";
     private static final Pattern GENERATION_DIRECTORY = Pattern.compile("generation-[0-9a-f]{40}");
+    private static final Pattern SHA1_PATTERN = Pattern.compile("[0-9a-f]{40}");
+    private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_.-]+");
 
     private SplitCacheIndex() {
     }
@@ -31,7 +34,9 @@ public final class SplitCacheIndex {
         }
 
         String sourceHash = null;
-        List<SplitPack> packs = new ArrayList<>();
+        boolean formatSeen = false;
+        boolean sourceSeen = false;
+        List<RawPack> rawPacks = new ArrayList<>();
 
         for (String line : Files.readAllLines(index, StandardCharsets.UTF_8)) {
             if (line.isBlank() || line.startsWith("#")) {
@@ -39,47 +44,79 @@ public final class SplitCacheIndex {
             }
 
             String[] parts = line.split("\t", -1);
+
             if (parts.length == 2 && "format".equals(parts[0])) {
+                if (formatSeen) {
+                    throw new IOException("Split cache index contains duplicate format metadata");
+                }
                 if (!"1".equals(parts[1])) {
                     throw new IOException("Unsupported split cache format: " + parts[1]);
                 }
+
+                formatSeen = true;
                 continue;
             }
 
             if (parts.length == 2 && "source".equals(parts[0])) {
+                if (sourceSeen) {
+                    throw new IOException("Split cache index contains duplicate source metadata");
+                }
+                if (!SHA1_PATTERN.matcher(parts[1]).matches()) {
+                    throw new IOException("Invalid split cache source SHA-1: " + parts[1]);
+                }
+
                 sourceHash = parts[1];
+                sourceSeen = true;
                 continue;
             }
 
             if (parts.length == 8 && "pack".equals(parts[0])) {
-                String namespace = parts[1];
-                String fingerprint = parts[2];
-                String sha1 = parts[3];
-                UUID uuid = UUID.fromString(parts[4]);
-                long size = Long.parseLong(parts[5]);
-                Path path = resolveSafe(root, parts[6]);
-                String fileName = parts[7];
-
-                if (!path.getFileName().toString().equals(fileName)) {
-                    throw new IOException("Invalid cached pack path metadata for namespace " + namespace);
-                }
-
-                packs.add(new SplitPack(
-                        namespace,
-                        path,
-                        fingerprint,
-                        sha1,
-                        uuid,
-                        size
-                ));
+                rawPacks.add(parseRawPack(parts));
                 continue;
             }
 
             throw new IOException("Invalid split cache index line: " + line);
         }
 
-        if (sourceHash == null || sourceHash.isBlank()) {
+        if (!formatSeen) {
+            throw new IOException("Split cache index is missing format metadata");
+        }
+        if (!sourceSeen || sourceHash == null) {
             throw new IOException("Split cache index is missing source hash");
+        }
+        if (rawPacks.isEmpty()) {
+            throw new IOException("Split cache index contains no resource packs");
+        }
+
+        Set<String> namespaces = new HashSet<>();
+        List<SplitPack> packs = new ArrayList<>(rawPacks.size());
+
+        for (RawPack raw : rawPacks) {
+            if (!namespaces.add(raw.namespace())) {
+                throw new IOException("Duplicate cached namespace: " + raw.namespace());
+            }
+
+            Path indexedPath = resolveSafe(root, raw.relativePath());
+            Path expectedDirectory = root.resolve("generation-" + sourceHash).normalize();
+            Path expectedPath = expectedDirectory.resolve(raw.namespace() + ".zip").normalize();
+
+            if (!indexedPath.equals(expectedPath)) {
+                throw new IOException(
+                        "Cached pack path does not match generation metadata for namespace "
+                                + raw.namespace()
+                );
+            }
+
+            Path verifiedPath = verifyCachedPack(root, indexedPath, raw);
+
+            packs.add(new SplitPack(
+                    raw.namespace(),
+                    verifiedPath,
+                    raw.fingerprint(),
+                    raw.sha1(),
+                    raw.uuid(),
+                    raw.size()
+            ));
         }
 
         return Optional.of(new Snapshot(sourceHash, List.copyOf(packs)));
@@ -155,8 +192,106 @@ public final class SplitCacheIndex {
         }
     }
 
+    private static RawPack parseRawPack(String[] parts) throws IOException {
+        String namespace = parts[1];
+        String fingerprint = parts[2];
+        String sha1 = parts[3];
+        String uuidText = parts[4];
+        String sizeText = parts[5];
+        String relativePath = parts[6];
+        String fileName = parts[7];
+
+        if (!NAMESPACE_PATTERN.matcher(namespace).matches()) {
+            throw new IOException("Invalid cached namespace: " + namespace);
+        }
+        if (!SHA256_PATTERN.matcher(fingerprint).matches()) {
+            throw new IOException("Invalid cached fingerprint for namespace " + namespace);
+        }
+        if (!SHA1_PATTERN.matcher(sha1).matches()) {
+            throw new IOException("Invalid cached SHA-1 for namespace " + namespace);
+        }
+        if (!(namespace + ".zip").equals(fileName)) {
+            throw new IOException("Invalid cached file name for namespace " + namespace);
+        }
+
+        final UUID uuid;
+        final long size;
+
+        try {
+            uuid = UUID.fromString(uuidText);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid cached UUID for namespace " + namespace, e);
+        }
+
+        if (!PackIdUtil.uuidForNamespace(namespace).equals(uuid)) {
+            throw new IOException("Cached UUID does not match namespace " + namespace);
+        }
+
+        try {
+            size = Long.parseLong(sizeText);
+        } catch (NumberFormatException e) {
+            throw new IOException("Invalid cached size for namespace " + namespace, e);
+        }
+
+        if (size < 0) {
+            throw new IOException("Negative cached size for namespace " + namespace);
+        }
+
+        return new RawPack(
+                namespace,
+                fingerprint,
+                sha1,
+                uuid,
+                size,
+                relativePath
+        );
+    }
+
+    private static Path verifyCachedPack(
+            Path root,
+            Path indexedPath,
+            RawPack raw
+    ) throws IOException {
+        if (isValidPackFile(indexedPath, raw.sha1(), raw.size())) {
+            return indexedPath;
+        }
+
+        Optional<Path> hosted = HostedPackStore.findValidBlob(
+                root,
+                raw.sha1(),
+                raw.size()
+        );
+
+        if (hosted.isPresent()) {
+            return hosted.get();
+        }
+
+        throw new IOException(
+                "Cached split pack is missing or corrupted for namespace " + raw.namespace()
+        );
+    }
+
+    private static boolean isValidPackFile(
+            Path path,
+            String sha1,
+            long size
+    ) throws IOException {
+        if (!Files.isRegularFile(path) || Files.size(path) != size) {
+            return false;
+        }
+
+        return PackHashUtil.sha1(path).equals(sha1);
+    }
+
     private static Path resolveSafe(Path root, String relativeText) throws IOException {
-        Path relative = Path.of(relativeText);
+        final Path relative;
+
+        try {
+            relative = Path.of(relativeText);
+        } catch (RuntimeException e) {
+            throw new IOException("Invalid path in split cache index: " + relativeText, e);
+        }
+
         if (relative.isAbsolute()) {
             throw new IOException("Absolute path in split cache index: " + relativeText);
         }
@@ -185,6 +320,16 @@ public final class SplitCacheIndex {
         } catch (AtomicMoveNotSupportedException ignored) {
             Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    private record RawPack(
+            String namespace,
+            String fingerprint,
+            String sha1,
+            UUID uuid,
+            long size,
+            String relativePath
+    ) {
     }
 
     public record Snapshot(String sourceHash, List<SplitPack> packs) {

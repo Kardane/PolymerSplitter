@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 public final class HostedPackStore {
@@ -47,8 +48,32 @@ public final class HostedPackStore {
         return Map.copyOf(result);
     }
 
+    public static Optional<Path> findValidBlob(
+            Path outputRoot,
+            String sha1,
+            long size
+    ) throws IOException {
+        Objects.requireNonNull(outputRoot, "outputRoot");
+        validateSha1(sha1);
+
+        if (size < 0) {
+            throw new IOException("Invalid hosted pack size: " + size);
+        }
+
+        Path target = outputRoot.toAbsolutePath()
+                .normalize()
+                .resolve(HOSTED_DIRECTORY)
+                .resolve(sha1 + ".zip");
+
+        if (!isValidBlob(target, sha1, size)) {
+            return Optional.empty();
+        }
+
+        return Optional.of(target);
+    }
+
     private static void ensureBlob(SplitPack pack, Path target) throws IOException {
-        if (isValidBlob(target, pack)) {
+        if (isValidBlob(target, pack.sha1(), pack.size())) {
             return;
         }
 
@@ -77,7 +102,7 @@ public final class HostedPackStore {
                 Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            if (!isValidBlob(temp, pack)) {
+            if (!isValidBlob(temp, pack.sha1(), pack.size())) {
                 throw new IOException("Hosted pack verification failed: " + pack.namespace());
             }
 
@@ -87,16 +112,20 @@ public final class HostedPackStore {
         }
     }
 
-    private static boolean isValidBlob(Path path, SplitPack pack) throws IOException {
-        if (!Files.isRegularFile(path) || Files.size(path) != pack.size()) {
+    private static boolean isValidBlob(
+            Path path,
+            String sha1,
+            long size
+    ) throws IOException {
+        if (!Files.isRegularFile(path) || Files.size(path) != size) {
             return false;
         }
 
-        return PackHashUtil.sha1(path).equals(pack.sha1());
+        return PackHashUtil.sha1(path).equals(sha1);
     }
 
     private static void validateSha1(String sha1) throws IOException {
-        if (!SHA1_PATTERN.matcher(sha1).matches()) {
+        if (sha1 == null || !SHA1_PATTERN.matcher(sha1).matches()) {
             throw new IOException("Invalid split pack SHA-1: " + sha1);
         }
     }

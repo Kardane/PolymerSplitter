@@ -28,7 +28,8 @@ Preserve these invariants:
 - Use the final split ZIP SHA-1 for Polymer/Minecraft pack metadata.
 - Use content-addressed AutoHost identifiers (`packs/<namespace>/<sha1>`) and immutable hosted blobs; never remap an old content URL to new bytes.
 - Do not replace the visible split registry until split generation and AutoHost registration complete.
-- If splitting fails or is not ready, leave Polymer's original main pack available as fallback.
+- Restore a startup cache only after validating its metadata and every referenced split pack; a broken cache must never become visible.
+- If splitting or cache recovery fails or is not ready, leave Polymer's original main pack available as fallback.
 - Do not remove Polymer external/global resource packs.
 - Keep ZIP generation deterministic where practical and preserve cache reuse for unchanged namespaces.
 - Treat Polymer internal implementation as version-sensitive. Prefer public Polymer APIs; keep Mixins minimal.

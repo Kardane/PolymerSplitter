@@ -47,6 +47,35 @@ public final class SplitCoordinator {
         lastFailure.set(null);
     }
 
+    public synchronized Optional<List<SplitPack>> restore(
+            Consumer<List<SplitPack>> beforePublish
+    ) throws IOException {
+        Objects.requireNonNull(beforePublish, "beforePublish");
+
+        try {
+            Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
+            if (cached.isEmpty()) {
+                return Optional.empty();
+            }
+
+            SplitCacheIndex.Snapshot snapshot = cached.get();
+            List<SplitPack> packs = List.copyOf(snapshot.packs());
+
+            beforePublish.accept(packs);
+
+            registry.replace(packs);
+            sourcePack.set(null);
+            sourceHash.set(snapshot.sourceHash());
+            lastFailure.set(null);
+            state.set(SplitState.READY);
+
+            return Optional.of(packs);
+        } catch (IOException | RuntimeException e) {
+            markFailed(e);
+            throw e;
+        }
+    }
+
     public synchronized List<SplitPack> process(Path generatedPack) throws IOException {
         return process(generatedPack, packs -> {
         });
