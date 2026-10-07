@@ -1,0 +1,14 @@
+plugins {
+    id "net.fabricmc.fabric-loom-remap"
+}
+
+ext {
+    target_minecraft = "1.21.11"
+    minecraft_range = ">=1.21.11 <26.1"
+    loader_version = "0.18.2"
+    fabric_api_version = "0.139.4+1.21.11"
+    polymer_version = "0.15.2+1.21.11"
+    java_version = 21
+}
+
+apply from: rootProject.file("gradle/version-module.gradle")

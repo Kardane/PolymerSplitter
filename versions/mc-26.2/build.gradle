@@ -1,0 +1,14 @@
+plugins {
+    id "net.fabricmc.fabric-loom"
+}
+
+ext {
+    target_minecraft = "26.2"
+    minecraft_range = ">=26.2 <26.3"
+    loader_version = "0.19.2"
+    fabric_api_version = "0.150.2+26.2"
+    polymer_version = "0.17.5+26.2"
+    java_version = 25
+}
+
+apply from: rootProject.file("gradle/version-module.gradle")

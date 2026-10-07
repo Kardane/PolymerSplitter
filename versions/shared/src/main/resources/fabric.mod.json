@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "polymersplitter",
+  "version": "${version}",
+  "name": "PolymerSplitter",
+  "description": "Splits Polymer-generated server resource packs into independently cacheable packs.",
+  "authors": [
+    "Kardane"
+  ],
+  "license": "All-Rights-Reserved",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "org.karn.polymersplitter.PolymerSplitter"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_range}",
+    "polymer-autohost": ">=${polymer_version}",
+    "polymer-resource-pack": ">=${polymer_version}"
+  }
+}

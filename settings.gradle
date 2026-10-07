@@ -1,9 +1,26 @@
 pluginManagement {
     repositories {
         maven {
-            name = 'Fabric'
-            url = 'https://maven.fabricmc.net/'
+            name = "Fabric"
+            url = "https://maven.fabricmc.net/"
         }
         gradlePluginPortal()
     }
 }
+
+rootProject.name = "PolymerSplitter"
+
+include "common"
+include "mc-1.21.8"
+include "mc-1.21.10"
+include "mc-1.21.11"
+include "mc-26.1"
+include "mc-26.2"
+include "mc-26.3"
+
+project(":mc-1.21.8").projectDir = file("versions/mc-1.21.8")
+project(":mc-1.21.10").projectDir = file("versions/mc-1.21.10")
+project(":mc-1.21.11").projectDir = file("versions/mc-1.21.11")
+project(":mc-26.1").projectDir = file("versions/mc-26.1")
+project(":mc-26.2").projectDir = file("versions/mc-26.2")
+project(":mc-26.3").projectDir = file("versions/mc-26.3")
