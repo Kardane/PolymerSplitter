@@ -12,12 +12,12 @@ import java.util.regex.Pattern;
 
 public final class SplitRecovery {
     private static final Pattern GENERATION_DIRECTORY = Pattern.compile("generation-[0-9a-f]{40}");
-    private static final Pattern LEGACY_CACHE_TEMP = Pattern.compile("^\.cache-.*\.tsv\.tmp$");
-    private static final Pattern INDEX_TEMP = Pattern.compile("^\.index-.*\.json\.tmp$");
-    private static final Pattern MANIFEST_TEMP = Pattern.compile("^\.manifest-.*\.json\.tmp$");
-    private static final Pattern PACK_TEMP = Pattern.compile("^\.[a-z0-9_.-]+\.zip.*\.tmp$");
-    private static final Pattern PACK_REUSE = Pattern.compile("^\.[a-z0-9_.-]+\.zip.*\.reuse$");
-    private static final Pattern HOSTED_BLOB = Pattern.compile("^[0-9a-f]{40}\.zip$");
+    private static final Pattern LEGACY_CACHE_TEMP = Pattern.compile("^\\.cache-.*\\.tsv\\.tmp$");
+    private static final Pattern INDEX_TEMP = Pattern.compile("^\\.index-.*\\.json\\.tmp$");
+    private static final Pattern MANIFEST_TEMP = Pattern.compile("^\\.manifest-.*\\.json\\.tmp$");
+    private static final Pattern PACK_TEMP = Pattern.compile("^\\.[a-z0-9_.-]+\\.zip.*\\.tmp$");
+    private static final Pattern PACK_REUSE = Pattern.compile("^\\.[a-z0-9_.-]+\\.zip.*\\.reuse$");
+    private static final Pattern HOSTED_BLOB = Pattern.compile("^[0-9a-f]{40}\\.zip$");
 
     private SplitRecovery() {
     }
