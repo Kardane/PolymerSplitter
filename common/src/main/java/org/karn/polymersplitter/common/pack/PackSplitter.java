@@ -1,7 +1,5 @@
 package org.karn.polymersplitter.common.pack;
 
-import org.karn.polymersplitter.common.io.AtomicFiles;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -34,12 +32,12 @@ public final class PackSplitter {
 
     public List<SplitPack> split(
             Path sourcePack,
-            Path outputDirectory,
+            Path outputRoot,
             SplitterConfig config,
             List<SplitPack> reusablePacks
     ) throws IOException {
         Objects.requireNonNull(sourcePack, "sourcePack");
-        Objects.requireNonNull(outputDirectory, "outputDirectory");
+        Objects.requireNonNull(outputRoot, "outputRoot");
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(reusablePacks, "reusablePacks");
 
@@ -47,7 +45,7 @@ public final class PackSplitter {
             throw new IOException("Source resource pack does not exist or is not a file: " + sourcePack);
         }
 
-        Files.createDirectories(outputDirectory);
+        Path hostedDirectory = HostedPackStore.directory(outputRoot);
 
         Map<String, SplitPack> reusableByNamespace = new HashMap<>();
         for (SplitPack pack : reusablePacks) {
@@ -73,7 +71,6 @@ public final class PackSplitter {
             List<SplitPack> packs = new ArrayList<>(layout.byNamespace().size());
             for (Map.Entry<String, List<ZipEntry>> namespaceEntry : layout.byNamespace().entrySet()) {
                 String namespace = namespaceEntry.getKey();
-                Path target = outputDirectory.resolve(namespace + ".zip");
                 String fingerprint = fingerprintNamespace(
                         zip,
                         sharedFingerprint,
@@ -82,11 +79,9 @@ public final class PackSplitter {
 
                 SplitPack reusable = reusableByNamespace.get(namespace);
                 if (canReuse(reusable, fingerprint)) {
-                    AtomicFiles.linkOrCopy(reusable.path(), target);
-
                     packs.add(new SplitPack(
                             namespace,
-                            target,
+                            reusable.path(),
                             fingerprint,
                             reusable.sha1(),
                             PackIdUtil.uuidForNamespace(namespace),
@@ -95,29 +90,46 @@ public final class PackSplitter {
                     continue;
                 }
 
-                writeNamespacePack(
-                        zip,
-                        packMeta,
-                        packIcon,
-                        layout.sharedRootEntries(),
-                        namespaceEntry.getValue(),
-                        target,
-                        config.deterministicZip()
+                Path temp = Files.createTempFile(
+                        hostedDirectory,
+                        "." + namespace + ".zip-",
+                        ".tmp"
                 );
 
-                packs.add(new SplitPack(
-                        namespace,
-                        target,
-                        fingerprint,
-                        Hashes.sha1(target),
-                        PackIdUtil.uuidForNamespace(namespace),
-                        Files.size(target)
-                ));
+                try {
+                    writeNamespacePack(
+                            zip,
+                            packMeta,
+                            packIcon,
+                            layout.sharedRootEntries(),
+                            namespaceEntry.getValue(),
+                            temp,
+                            config.deterministicZip()
+                    );
+
+                    String sha1 = Hashes.sha1(temp);
+                    long size = Files.size(temp);
+                    Path hosted = HostedPackStore.commitGeneratedBlob(
+                            outputRoot,
+                            temp,
+                            sha1,
+                            size
+                    );
+
+                    packs.add(new SplitPack(
+                            namespace,
+                            hosted,
+                            fingerprint,
+                            sha1,
+                            PackIdUtil.uuidForNamespace(namespace),
+                            size
+                    ));
+                } finally {
+                    Files.deleteIfExists(temp);
+                }
             }
 
-            List<SplitPack> result = List.copyOf(packs);
-            SplitPackManifest.write(outputDirectory, result);
-            return result;
+            return List.copyOf(packs);
         }
     }
 
@@ -160,7 +172,6 @@ public final class PackSplitter {
 
             int separator = name.indexOf('/');
             if (separator < 0) {
-                // Preserve root-level metadata/documentation in every split pack.
                 sharedRootEntries.add(entry);
                 continue;
             }
@@ -174,7 +185,6 @@ public final class PackSplitter {
 
             String overlayRelativePath = name.substring(separator + 1);
 
-            // Minecraft ignores pack.mcmeta and pack.png inside overlay directories.
             if (PACK_META.equals(overlayRelativePath) || PACK_ICON.equals(overlayRelativePath)) {
                 continue;
             }
@@ -287,45 +297,34 @@ public final class PackSplitter {
             Path target,
             boolean deterministic
     ) throws IOException {
-        Path directory = target.getParent();
-        Files.createDirectories(directory);
+        try (OutputStream rawOutput = Files.newOutputStream(target);
+             ZipOutputStream output = new ZipOutputStream(rawOutput)) {
 
-        Path temp = Files.createTempFile(directory, "." + target.getFileName(), ".tmp");
+            copyEntry(source, packMeta, PACK_META, output, deterministic);
 
-        try {
-            try (OutputStream rawOutput = Files.newOutputStream(temp);
-                 ZipOutputStream output = new ZipOutputStream(rawOutput)) {
-
-                copyEntry(source, packMeta, PACK_META, output, deterministic);
-
-                if (packIcon != null && !packIcon.isDirectory()) {
-                    copyEntry(source, packIcon, PACK_ICON, output, deterministic);
-                }
-
-                for (ZipEntry entry : sharedRootEntries) {
-                    copyEntry(
-                            source,
-                            entry,
-                            validateEntryName(entry.getName()),
-                            output,
-                            deterministic
-                    );
-                }
-
-                for (ZipEntry entry : assetEntries) {
-                    copyEntry(
-                            source,
-                            entry,
-                            validateEntryName(entry.getName()),
-                            output,
-                            deterministic
-                    );
-                }
+            if (packIcon != null && !packIcon.isDirectory()) {
+                copyEntry(source, packIcon, PACK_ICON, output, deterministic);
             }
 
-            AtomicFiles.replace(temp, target);
-        } finally {
-            Files.deleteIfExists(temp);
+            for (ZipEntry entry : sharedRootEntries) {
+                copyEntry(
+                        source,
+                        entry,
+                        validateEntryName(entry.getName()),
+                        output,
+                        deterministic
+                );
+            }
+
+            for (ZipEntry entry : assetEntries) {
+                copyEntry(
+                        source,
+                        entry,
+                        validateEntryName(entry.getName()),
+                        output,
+                        deterministic
+                );
+            }
         }
     }
 

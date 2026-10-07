@@ -1,5 +1,11 @@
 package org.karn.polymersplitter.common.pack;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.karn.polymersplitter.common.io.AtomicFiles;
 
 import java.io.IOException;
@@ -14,11 +20,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 public final class SplitCacheIndex {
-    private static final String FILE_NAME = "current-cache.tsv";
-    private static final Pattern GENERATION_DIRECTORY = Pattern.compile("generation-[0-9a-f]{40}");
+    public static final String FILE_NAME = "index.json";
+    private static final int FORMAT = 2;
+    private static final Gson GSON = new GsonBuilder()
+            .setPrettyPrinting()
+            .disableHtmlEscaping()
+            .create();
 
     private SplitCacheIndex() {
     }
@@ -31,368 +40,224 @@ public final class SplitCacheIndex {
             return Optional.empty();
         }
 
-        String sourceHash = null;
-        boolean formatSeen = false;
-        boolean sourceSeen = false;
-        List<RawPack> rawPacks = new ArrayList<>();
-
-        for (String line : Files.readAllLines(index, StandardCharsets.UTF_8)) {
-            if (line.isBlank() || line.startsWith("#")) {
-                continue;
+        final JsonObject object;
+        try {
+            JsonElement parsed = JsonParser.parseString(
+                    Files.readString(index, StandardCharsets.UTF_8)
+            );
+            if (!parsed.isJsonObject()) {
+                throw new IOException("Split cache index root must be a JSON object");
             }
-
-            String[] parts = line.split("\t", -1);
-
-            if (parts.length == 2 && "format".equals(parts[0])) {
-                if (formatSeen) {
-                    throw new IOException("Split cache index contains duplicate format metadata");
-                }
-                if (!"1".equals(parts[1])) {
-                    throw new IOException("Unsupported split cache format: " + parts[1]);
-                }
-
-                formatSeen = true;
-                continue;
-            }
-
-            if (parts.length == 2 && "source".equals(parts[0])) {
-                if (sourceSeen) {
-                    throw new IOException("Split cache index contains duplicate source metadata");
-                }
-                if (!Hashes.isSha1(parts[1])) {
-                    throw new IOException("Invalid split cache source SHA-1: " + parts[1]);
-                }
-
-                sourceHash = parts[1];
-                sourceSeen = true;
-                continue;
-            }
-
-            if (parts.length == 8 && "pack".equals(parts[0])) {
-                rawPacks.add(parseRawPack(parts));
-                continue;
-            }
-
-            throw new IOException("Invalid split cache index line: " + line);
+            object = parsed.getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("Failed to parse split cache index", e);
         }
 
-        if (!formatSeen) {
-            throw new IOException("Split cache index is missing format metadata");
+        int format = requireInt(object, "format");
+        if (format != FORMAT) {
+            throw new IOException("Unsupported split cache format: " + format);
         }
-        if (!sourceSeen || sourceHash == null) {
-            throw new IOException("Split cache index is missing source hash");
+
+        String sourceHash = requireString(object, "sourceSha1");
+        if (!Hashes.isSha1(sourceHash)) {
+            throw new IOException("Invalid split cache source SHA-1: " + sourceHash);
         }
-        if (rawPacks.isEmpty()) {
+
+        JsonElement packsElement = object.get("packs");
+        if (packsElement == null || !packsElement.isJsonArray()) {
+            throw new IOException("Split cache index is missing packs array");
+        }
+
+        JsonArray array = packsElement.getAsJsonArray();
+        if (array.isEmpty()) {
             throw new IOException("Split cache index contains no resource packs");
         }
 
         Set<String> namespaces = new HashSet<>();
-        List<SplitPack> packs = new ArrayList<>(rawPacks.size());
+        List<SplitPack> packs = new ArrayList<>(array.size());
 
-        for (RawPack raw : rawPacks) {
-            if (!namespaces.add(raw.namespace())) {
-                throw new IOException("Duplicate cached namespace: " + raw.namespace());
+        for (JsonElement element : array) {
+            if (!element.isJsonObject()) {
+                throw new IOException("Split cache pack entry must be a JSON object");
             }
 
-            Path indexedPath = resolveSafe(root, raw.relativePath());
-            Path expectedDirectory = root.resolve("generation-" + sourceHash).normalize();
-            Path expectedPath = expectedDirectory.resolve(raw.namespace() + ".zip").normalize();
+            JsonObject packObject = element.getAsJsonObject();
+            String namespace = requireString(packObject, "namespace");
+            String fingerprint = requireString(packObject, "fingerprint");
+            String sha1 = requireString(packObject, "sha1");
+            String uuidText = requireString(packObject, "uuid");
+            long size = requireLong(packObject, "size");
 
-            if (!indexedPath.equals(expectedPath)) {
-                throw new IOException(
-                        "Cached pack path does not match generation metadata for namespace "
-                                + raw.namespace()
-                );
+            if (!ResourceNamespaces.isValid(namespace)) {
+                throw new IOException("Invalid cached namespace: " + namespace);
+            }
+            if (!namespaces.add(namespace)) {
+                throw new IOException("Duplicate cached namespace: " + namespace);
+            }
+            if (!Hashes.isSha256(fingerprint)) {
+                throw new IOException("Invalid cached fingerprint for namespace " + namespace);
+            }
+            if (!Hashes.isSha1(sha1)) {
+                throw new IOException("Invalid cached SHA-1 for namespace " + namespace);
+            }
+            if (size < 0) {
+                throw new IOException("Negative cached size for namespace " + namespace);
+            }
+
+            final UUID uuid;
+            try {
+                uuid = UUID.fromString(uuidText);
+            } catch (IllegalArgumentException e) {
+                throw new IOException("Invalid cached UUID for namespace " + namespace, e);
+            }
+
+            if (!PackIdUtil.uuidForNamespace(namespace).equals(uuid)) {
+                throw new IOException("Cached UUID does not match namespace " + namespace);
             }
 
             packs.add(new SplitPack(
-                    raw.namespace(),
-                    indexedPath,
-                    raw.fingerprint(),
-                    raw.sha1(),
-                    raw.uuid(),
-                    raw.size()
+                    namespace,
+                    HostedPackStore.pathFor(root, sha1),
+                    fingerprint,
+                    sha1,
+                    uuid,
+                    size
             ));
         }
 
         return Optional.of(new Snapshot(sourceHash, List.copyOf(packs)));
     }
 
-    public static Verification verify(
+    public static Snapshot verify(
             Path outputRoot,
             Snapshot snapshot
     ) throws IOException {
-        Path root = outputRoot.toAbsolutePath().normalize();
         Objects.requireNonNull(snapshot, "snapshot");
 
-        List<String> restoreNamespaces = new ArrayList<>();
-
         for (SplitPack pack : snapshot.packs()) {
-            if (isValidPackFile(pack.path(), pack.sha1(), pack.size())) {
-                continue;
-            }
-
-            if (HostedPackStore.findValidBlob(root, pack.sha1(), pack.size()).isPresent()) {
-                restoreNamespaces.add(pack.namespace());
-                continue;
-            }
-
-            throw new IOException(
-                    "Cached split pack is missing or corrupted for namespace " + pack.namespace()
-            );
-        }
-
-        return new Verification(snapshot, List.copyOf(restoreNamespaces));
-    }
-
-    public static Snapshot repair(
-            Path outputRoot,
-            Verification verification
-    ) throws IOException {
-        Path root = outputRoot.toAbsolutePath().normalize();
-        Objects.requireNonNull(verification, "verification");
-
-        Snapshot snapshot = verification.snapshot();
-
-        for (String namespace : verification.restoreNamespaces()) {
-            SplitPack pack = snapshot.packs().stream()
-                    .filter(candidate -> candidate.namespace().equals(namespace))
-                    .findFirst()
-                    .orElseThrow(() -> new IOException(
-                            "Cache repair references unknown namespace " + namespace
-                    ));
-
-            HostedPackStore.restoreGenerationFile(
-                    root,
+            Path hosted = HostedPackStore.findValidBlob(
+                    outputRoot,
                     pack.sha1(),
-                    pack.size(),
-                    pack.path()
-            );
+                    pack.size()
+            ).orElseThrow(() -> new IOException(
+                    "Cached split blob is missing or corrupted for namespace "
+                            + pack.namespace()
+            ));
+
+            if (!hosted.equals(pack.path().toAbsolutePath().normalize())) {
+                throw new IOException(
+                        "Cached split blob path is not canonical for namespace "
+                                + pack.namespace()
+                );
+            }
         }
 
-        reconcileGeneration(root, snapshot.sourceHash(), snapshot.packs());
         return snapshot;
     }
 
-    public static void reconcileGeneration(
+    public static void write(
             Path outputRoot,
             String sourceHash,
             List<SplitPack> packs
     ) throws IOException {
         Path root = outputRoot.toAbsolutePath().normalize();
-        Path generationDirectory = root.resolve("generation-" + sourceHash).normalize();
-        Files.createDirectories(generationDirectory);
-
-        Set<String> expectedFiles = new HashSet<>();
-        for (SplitPack pack : packs) {
-            Path expectedPath = generationDirectory.resolve(pack.namespace() + ".zip").normalize();
-
-            if (!pack.path().toAbsolutePath().normalize().equals(expectedPath)) {
-                throw new IOException(
-                        "Split pack path is not part of the active generation: " + pack.path()
-                );
-            }
-
-            expectedFiles.add(pack.namespace() + ".zip");
-        }
-
-        try (var entries = Files.list(generationDirectory)) {
-            for (Path entry : entries.toList()) {
-                String name = entry.getFileName().toString();
-
-                if (Files.isRegularFile(entry)
-                        && name.endsWith(".zip")
-                        && !expectedFiles.contains(name)) {
-                    Files.deleteIfExists(entry);
-                }
-            }
-        }
-
-        SplitPackManifest.write(generationDirectory, packs);
-    }
-
-    public static void write(Path outputRoot, String sourceHash, List<SplitPack> packs) throws IOException {
-        Path root = outputRoot.toAbsolutePath().normalize();
         Files.createDirectories(root);
 
-        StringBuilder content = new StringBuilder(256 + packs.size() * 256);
-        content.append("format\t1\n");
-        content.append("source\t").append(sourceHash).append('\n');
+        if (!Hashes.isSha1(sourceHash)) {
+            throw new IOException("Invalid split cache source SHA-1: " + sourceHash);
+        }
+        if (packs.isEmpty()) {
+            throw new IOException("Cannot write an empty split cache index");
+        }
+
+        JsonObject rootObject = new JsonObject();
+        rootObject.addProperty("format", FORMAT);
+        rootObject.addProperty("sourceSha1", sourceHash);
+
+        JsonArray array = new JsonArray();
+        Set<String> namespaces = new HashSet<>();
 
         for (SplitPack pack : packs.stream()
                 .sorted(Comparator.comparing(SplitPack::namespace))
                 .toList()) {
-            Path absolutePackPath = pack.path().toAbsolutePath().normalize();
-            if (!absolutePackPath.startsWith(root)) {
-                throw new IOException("Cached pack is outside output root: " + absolutePackPath);
+            if (!namespaces.add(pack.namespace())) {
+                throw new IOException("Duplicate split namespace: " + pack.namespace());
             }
 
-            String relative = root.relativize(absolutePackPath).toString().replace('\\', '/');
+            Path expectedPath = HostedPackStore.pathFor(root, pack.sha1());
+            if (!pack.path().toAbsolutePath().normalize().equals(expectedPath)) {
+                throw new IOException(
+                        "Split pack is outside the content-addressed store: " + pack.path()
+                );
+            }
 
-            content.append("pack\t")
-                    .append(pack.namespace()).append('\t')
-                    .append(pack.fingerprint()).append('\t')
-                    .append(pack.sha1()).append('\t')
-                    .append(pack.uuid()).append('\t')
-                    .append(pack.size()).append('\t')
-                    .append(relative).append('\t')
-                    .append(pack.path().getFileName())
-                    .append('\n');
+            JsonObject packObject = new JsonObject();
+            packObject.addProperty("namespace", pack.namespace());
+            packObject.addProperty("fingerprint", pack.fingerprint());
+            packObject.addProperty("sha1", pack.sha1());
+            packObject.addProperty("uuid", pack.uuid().toString());
+            packObject.addProperty("size", pack.size());
+            array.add(packObject);
         }
 
+        rootObject.add("packs", array);
+
         Path target = root.resolve(FILE_NAME);
-        Path temp = Files.createTempFile(root, ".cache-", ".tsv.tmp");
+        Path temp = Files.createTempFile(root, ".index-", ".json.tmp");
 
         try {
-            Files.writeString(temp, content.toString(), StandardCharsets.UTF_8);
+            Files.writeString(
+                    temp,
+                    GSON.toJson(rootObject) + System.lineSeparator(),
+                    StandardCharsets.UTF_8
+            );
             AtomicFiles.replace(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }
     }
 
-    public static void cleanupOldGenerations(
-            Path outputRoot,
-            String currentSourceHash,
-            String previousSourceHash
-    ) throws IOException {
-        Path root = outputRoot.toAbsolutePath().normalize();
-        if (!Files.isDirectory(root)) {
-            return;
-        }
-
-        Set<String> keep = new HashSet<>();
-        keep.add("generation-" + currentSourceHash);
-        if (previousSourceHash != null && !previousSourceHash.isBlank()) {
-            keep.add("generation-" + previousSourceHash);
-        }
-
-        try (var entries = Files.list(root)) {
-            for (Path entry : entries.toList()) {
-                String fileName = entry.getFileName().toString();
-                if (!Files.isDirectory(entry)
-                        || !GENERATION_DIRECTORY.matcher(fileName).matches()
-                        || keep.contains(fileName)) {
-                    continue;
-                }
-
-                AtomicFiles.deleteRecursively(entry);
-            }
-        }
-    }
-
-    private static RawPack parseRawPack(String[] parts) throws IOException {
-        String namespace = parts[1];
-        String fingerprint = parts[2];
-        String sha1 = parts[3];
-        String uuidText = parts[4];
-        String sizeText = parts[5];
-        String relativePath = parts[6];
-        String fileName = parts[7];
-
-        if (!ResourceNamespaces.isValid(namespace)) {
-            throw new IOException("Invalid cached namespace: " + namespace);
-        }
-        if (!Hashes.isSha256(fingerprint)) {
-            throw new IOException("Invalid cached fingerprint for namespace " + namespace);
-        }
-        if (!Hashes.isSha1(sha1)) {
-            throw new IOException("Invalid cached SHA-1 for namespace " + namespace);
-        }
-        if (!(namespace + ".zip").equals(fileName)) {
-            throw new IOException("Invalid cached file name for namespace " + namespace);
-        }
-
-        final UUID uuid;
-        final long size;
-
-        try {
-            uuid = UUID.fromString(uuidText);
-        } catch (IllegalArgumentException e) {
-            throw new IOException("Invalid cached UUID for namespace " + namespace, e);
-        }
-
-        if (!PackIdUtil.uuidForNamespace(namespace).equals(uuid)) {
-            throw new IOException("Cached UUID does not match namespace " + namespace);
-        }
-
-        try {
-            size = Long.parseLong(sizeText);
-        } catch (NumberFormatException e) {
-            throw new IOException("Invalid cached size for namespace " + namespace, e);
-        }
-
-        if (size < 0) {
-            throw new IOException("Negative cached size for namespace " + namespace);
-        }
-
-        return new RawPack(
-                namespace,
-                fingerprint,
-                sha1,
-                uuid,
-                size,
-                relativePath
+    public static boolean exists(Path outputRoot) {
+        return Files.isRegularFile(
+                outputRoot.toAbsolutePath().normalize().resolve(FILE_NAME)
         );
     }
 
-    private static boolean isValidPackFile(
-            Path path,
-            String sha1,
-            long size
-    ) throws IOException {
-        if (!Files.isRegularFile(path) || Files.size(path) != size) {
-            return false;
+    private static String requireString(JsonObject object, String name) throws IOException {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonPrimitive()
+                || !element.getAsJsonPrimitive().isString()) {
+            throw new IOException("Split cache index field '" + name + "' must be a string");
         }
-
-        return Hashes.sha1(path).equals(sha1);
+        return element.getAsString();
     }
 
-    private static Path resolveSafe(Path root, String relativeText) throws IOException {
-        final Path relative;
+    private static int requireInt(JsonObject object, String name) throws IOException {
+        long value = requireLong(object, name);
+        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+            throw new IOException("Split cache index field '" + name + "' is out of range");
+        }
+        return (int) value;
+    }
+
+    private static long requireLong(JsonObject object, String name) throws IOException {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonPrimitive()
+                || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IOException("Split cache index field '" + name + "' must be a number");
+        }
 
         try {
-            relative = Path.of(relativeText);
+            return element.getAsLong();
         } catch (RuntimeException e) {
-            throw new IOException("Invalid path in split cache index: " + relativeText, e);
+            throw new IOException("Invalid numeric split cache field '" + name + "'", e);
         }
-
-        if (relative.isAbsolute()) {
-            throw new IOException("Absolute path in split cache index: " + relativeText);
-        }
-
-        Path resolved = root.resolve(relative).normalize();
-        if (!resolved.startsWith(root)) {
-            throw new IOException("Unsafe path in split cache index: " + relativeText);
-        }
-
-        return resolved;
-    }
-
-    private record RawPack(
-            String namespace,
-            String fingerprint,
-            String sha1,
-            UUID uuid,
-            long size,
-            String relativePath
-    ) {
     }
 
     public record Snapshot(String sourceHash, List<SplitPack> packs) {
         public Snapshot {
             Objects.requireNonNull(sourceHash, "sourceHash");
             packs = List.copyOf(packs);
-        }
-    }
-
-    public record Verification(
-            Snapshot snapshot,
-            List<String> restoreNamespaces
-    ) {
-        public Verification {
-            Objects.requireNonNull(snapshot, "snapshot");
-            restoreNamespaces = List.copyOf(restoreNamespaces);
         }
     }
 }

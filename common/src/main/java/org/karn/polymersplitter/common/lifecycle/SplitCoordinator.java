@@ -1,9 +1,11 @@
 package org.karn.polymersplitter.common.lifecycle;
 
 import org.karn.polymersplitter.common.pack.Hashes;
+import org.karn.polymersplitter.common.pack.LegacyCacheMigration;
 import org.karn.polymersplitter.common.pack.PackSplitter;
 import org.karn.polymersplitter.common.pack.SplitCacheIndex;
 import org.karn.polymersplitter.common.pack.SplitPack;
+import org.karn.polymersplitter.common.pack.SplitRecovery;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 
 import java.io.IOException;
@@ -43,19 +45,19 @@ public final class SplitCoordinator {
         Objects.requireNonNull(beforePublish, "beforePublish");
 
         try {
+            LegacyCacheMigration.migrateIfNeeded(outputRoot);
+
             Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
             if (cached.isEmpty()) {
                 return Optional.empty();
             }
 
-            SplitCacheIndex.Verification verification =
+            SplitCacheIndex.Snapshot verified =
                     SplitCacheIndex.verify(outputRoot, cached.get());
-            SplitCacheIndex.Snapshot repaired =
-                    SplitCacheIndex.repair(outputRoot, verification);
 
             SplitGeneration generation = SplitGeneration.create(
-                    repaired.sourceHash(),
-                    repaired.packs()
+                    verified.sourceHash(),
+                    verified.packs()
             );
 
             beforePublish.accept(generation.packs());
@@ -67,6 +69,7 @@ public final class SplitCoordinator {
                     NamespaceTransition.between(current.generation(), generation)
             ));
 
+            cleanupLegacyArtifactsBestEffort();
             return Optional.of(generation.packs());
         } catch (IOException | RuntimeException e) {
             markFailed(e);
@@ -90,7 +93,6 @@ public final class SplitCoordinator {
             }
 
             String hash = Hashes.sha1(normalizedSource);
-            Path generationDirectory = outputRoot.resolve("generation-" + hash);
 
             Optional<SplitCacheIndex.Snapshot> previousCache = loadCacheForReuseBestEffort();
             List<SplitPack> reusablePacks = previousCache
@@ -99,7 +101,7 @@ public final class SplitCoordinator {
 
             List<SplitPack> packs = splitter.split(
                     normalizedSource,
-                    generationDirectory,
+                    outputRoot,
                     config,
                     reusablePacks
             );
@@ -110,13 +112,10 @@ public final class SplitCoordinator {
 
             SplitGeneration generation = SplitGeneration.create(hash, packs);
 
-            // External publication (for example immutable AutoHost registration) must
-            // complete before persistent/current generation state becomes visible.
             beforePublish.accept(generation.packs());
 
-            // The cache index is part of publication state, not best-effort metadata.
-            // It must be atomically committed before the coordinator snapshot advances.
-            SplitCacheIndex.reconcileGeneration(outputRoot, hash, generation.packs());
+            // index.json is the durable publication pointer. All referenced blobs
+            // already exist in the immutable content-addressed store.
             SplitCacheIndex.write(outputRoot, hash, generation.packs());
 
             snapshot.updateAndGet(current -> new CoordinatorSnapshot(
@@ -126,11 +125,7 @@ public final class SplitCoordinator {
                     NamespaceTransition.between(current.generation(), generation)
             ));
 
-            cleanupOldGenerationsBestEffort(
-                    hash,
-                    previousCache.map(SplitCacheIndex.Snapshot::sourceHash).orElse(null)
-            );
-
+            cleanupLegacyArtifactsBestEffort();
             return generation.packs();
         } catch (IOException | RuntimeException e) {
             markFailed(e);
@@ -149,24 +144,24 @@ public final class SplitCoordinator {
 
     private Optional<SplitCacheIndex.Snapshot> loadCacheForReuseBestEffort() {
         try {
+            LegacyCacheMigration.migrateIfNeeded(outputRoot);
+
             Optional<SplitCacheIndex.Snapshot> cached = SplitCacheIndex.read(outputRoot);
             if (cached.isEmpty()) {
                 return Optional.empty();
             }
 
-            SplitCacheIndex.Verification verification =
-                    SplitCacheIndex.verify(outputRoot, cached.get());
-            return Optional.of(SplitCacheIndex.repair(outputRoot, verification));
+            return Optional.of(SplitCacheIndex.verify(outputRoot, cached.get()));
         } catch (IOException | RuntimeException ignored) {
             return Optional.empty();
         }
     }
 
-    private void cleanupOldGenerationsBestEffort(String currentHash, String previousHash) {
+    private void cleanupLegacyArtifactsBestEffort() {
         try {
-            SplitCacheIndex.cleanupOldGenerations(outputRoot, currentHash, previousHash);
+            SplitRecovery.cleanupLegacyArtifacts(outputRoot);
         } catch (IOException | RuntimeException ignored) {
-            // Old generation cleanup is opportunistic and must not affect pack delivery.
+            // Legacy files are no longer authoritative once index.json is committed.
         }
     }
 

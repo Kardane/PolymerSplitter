@@ -42,9 +42,9 @@ public final class PolymerAutoHostBridge {
 
         final Map<String, Path> hostedFiles;
         try {
-            hostedFiles = HostedPackStore.materialize(outputRoot, packs);
+            hostedFiles = HostedPackStore.resolvePublished(outputRoot, packs);
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to materialize immutable hosted packs", e);
+            throw new UncheckedIOException("Failed to resolve immutable hosted packs", e);
         }
 
         for (SplitPack pack : packs) {

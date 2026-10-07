@@ -49,8 +49,8 @@ common/
     SplitterConfig
     PackIdUtil
     HostedPackStore
+    LegacyCacheMigration
     SplitRecovery
-    SplitPackManifest
     SplitCacheIndex
 
 versions/
@@ -177,16 +177,15 @@ A newly generated resource-pack generation is published in this order:
 3. Build or reuse all namespace packs.
 4. Materialize every final ZIP into the immutable content-addressed hosted blob store.
 5. Register content-addressed hosted identifiers with Polymer AutoHost.
-6. Reconcile the generation directory to the exact namespace set and rewrite its manifest.
-7. Atomically commit `current-cache.tsv`.
-8. Atomically publish one `CoordinatorSnapshot` containing `READY`, the new `SplitGeneration`, cleared failure state, and the computed namespace transition.
-9. Opportunistically clean old generation directories.
+6. Atomically commit `index.json`, which points only at immutable `hosted/<sha1>.zip` blobs.
+7. Atomically publish one `CoordinatorSnapshot` containing `READY`, the new `SplitGeneration`, cleared failure state, and the computed namespace transition.
+8. Best-effort cleanup may remove legacy TSV/generation artifacts, but runtime historical hosted blobs are retained.
 
 If any publication step before the atomic snapshot update fails, the previous generation remains in the snapshot and the coordinator becomes `FAILED`. Content-addressed AutoHost IDs that were registered before a later failure are unadvertised immutable entries and cannot remap an already issued URL. Main-pack suppression is active only while the coordinator snapshot is `READY` with a non-null generation.
 
 The active `SplitGeneration` contains the source hash, deterministic pack order, and exact namespace map. It is stored inside the same atomic `CoordinatorSnapshot` as the lifecycle state, so readers cannot observe a READY state paired with a different registry generation. The primary `minecraft` pack is ordered first when present; remaining namespaces are lexicographic.
 
-Before the registry advances, the generation directory is reconciled so stale namespace ZIPs are removed, the manifest is rewritten from the exact pack set, and the cache index is atomically committed. A cache-index write failure therefore prevents the new generation from becoming `READY`.
+Before the coordinator advances, every current namespace already resolves to an immutable content-addressed blob and `index.json` is atomically committed. An index write failure therefore prevents the new generation from becoming `READY`. No persistent generation-directory copy or manifest is created.
 
 `NamespaceTransition` compares the previous and next snapshots and records added, removed, content-changed, and unchanged namespaces. Removed namespaces disappear from the next collector immediately because delivery reads only the current snapshot.
 
@@ -283,19 +282,20 @@ For cache stability, namespace ZIP generation:
 
 Deterministic output is intended to avoid hash churn from filesystem timestamps and traversal order.
 
-## 10. Cache model
+## 10. Cache and storage model
 
-Persistent cache metadata lives under:
-
-```text
-config/polymersplitter/generated/current-cache.tsv
-```
-
-Generation data lives under:
+The persistent storage root is:
 
 ```text
-config/polymersplitter/generated/generation-<source-sha1>/
+config/polymersplitter/generated/
+  index.json
+  hosted/
+    <sha1>.zip
 ```
+
+`hosted/<sha1>.zip` is the single persistent copy of every split ZIP. `SplitPack.path()` always points to this content-addressed location.
+
+`index.json` format 2 is the durable pointer to the current generation. It stores the source pack SHA-1 and, for each namespace, its fingerprint, final ZIP SHA-1, deterministic UUID, and size. Paths are not stored; they are derived from the SHA-1.
 
 ### Namespace fingerprint
 
@@ -309,43 +309,50 @@ The SHA-256 fingerprint includes:
 
 A shared metadata change therefore invalidates all namespace fingerprints.
 
-### Cache validation and recovery
+### New generation
 
-Cache loading is deliberately split into three phases:
+For each namespace:
 
-1. `SplitCacheIndex.read(...)` parses `current-cache.tsv` and validates metadata only: format/source SHA-1, unique namespaces, fingerprints, final SHA-1 values, deterministic UUIDs, sizes, safe generation-relative paths, and expected `<namespace>.zip` names. It does not hash, restore, delete, or rewrite files.
-2. `SplitCacheIndex.verify(...)` is read-only filesystem verification. It checks generation ZIP size/SHA-1 and, when a generation ZIP is missing or invalid, verifies whether the matching immutable `hosted/<sha1>.zip` can repair it. It returns a repair plan and performs no mutation.
-3. `SplitCacheIndex.repair(...)` performs the planned hosted-blob restoration, reconciles the generation directory to the exact cached namespace set, removes stale namespace ZIPs, and rewrites the manifest.
+1. Compute its fingerprint.
+2. If the previous verified index has the same fingerprint, reuse the existing immutable blob directly; no hard link or copy is created.
+3. Otherwise write one temporary ZIP inside `hosted/`.
+4. Compute the final ZIP SHA-1 once.
+5. Atomically move the temporary ZIP to `hosted/<sha1>.zip`.
+6. Register the content-addressed hosted ID.
+7. After all namespaces are ready, atomically replace `index.json`.
 
-This separation keeps metadata reads predictable while preserving Phase 12 recovery behavior.
+A failed publication can leave an unreferenced immutable blob, but cannot remap an issued URL or advance the current index.
 
-The coordinator is restored only after metadata read, file verification, explicit repair, and AutoHost registration all succeed. One invalid namespace invalidates the entire startup recovery; partial cached delivery is not published.
+### Startup read and verification
 
-### Reuse
+Normal format-2 startup is deliberately read-only until publication:
 
-If namespace and fingerprint match a validated previous cached pack:
+1. `SplitCacheIndex.read(...)` parses and validates `index.json` metadata without mutating files.
+2. `SplitCacheIndex.verify(...)` verifies every referenced hosted blob's size and SHA-1.
+3. Only after the entire index verifies are the blobs registered with AutoHost and the coordinator snapshot restored.
 
-1. Reuse its SHA-1 and size.
-2. Materialize it into the new generation using a hard link.
-3. Fall back to a file copy if hard linking is unavailable.
+There is no normal cache-repair phase because the content-addressed blob is the canonical file. A missing/corrupted referenced blob invalidates the cached generation and falls back to Polymer's normal main pack.
 
-### Retention
+### One-time legacy migration
 
-After successful publication, the cache keeps the current generation and the immediately previous generation. Older `generation-<sha1>` directories are removed on a best-effort basis.
+If `index.json` is absent but legacy `current-cache.tsv` exists, `LegacyCacheMigration`:
 
-AutoHost does not serve generation files directly. Each final split ZIP is materialized into:
+1. parses and validates the legacy metadata,
+2. accepts an already-valid `hosted/<sha1>.zip` when present,
+3. otherwise validates the referenced `generation-<source-sha1>/<namespace>.zip` and promotes it into `hosted/<sha1>.zip`,
+4. atomically writes format-2 `index.json`,
+5. only then allows legacy TSV/generation directories to be removed.
 
-```text
-config/polymersplitter/generated/hosted/<sha1>.zip
-```
+An invalid legacy cache is never partially migrated. New generation can still proceed without cache reuse.
 
-The hosted copy is immutable and independent from generation-directory cleanup. Hard links are preferred; ordinary copies are used when hard linking is unavailable.
+### Retention and garbage collection
 
-Cache-index write failure is a publication failure and prevents the new coordinator snapshot from becoming `READY`. Old-generation cleanup failure is best-effort and does not invalidate an otherwise published generation. Startup cache read/verify/repair failure prevents cached publication and leaves Polymer's main pack as the fallback.
+Historical content-addressed blobs are retained for the entire running server so already-issued URLs remain valid. They are not garbage-collected during rebuilds.
 
-### Interrupted-state cleanup
+After a later server start successfully restores the current `index.json`, blobs not referenced by that index are safe to remove because prior-process AutoHost mappings have been cleared. Cleanup is best-effort and never changes the active index.
 
-Startup recovery removes only temporary files owned by PolymerSplitter (cache, manifest, namespace ZIP/reuse, and hosted-blob temp files). It also removes non-current `generation-<sha1>` directories that have no completed `manifest.json`. Complete non-current generations are left to the normal retention lifecycle.
+Interrupted temporary files are removed on startup. Legacy generation directories and `current-cache.tsv` are cleanup-only artifacts after format-2 index commit.
+
 
 ## 11. Polymer AutoHost integration
 
@@ -357,7 +364,7 @@ polymersplitter:packs/<namespace>/<sha1>
 
 The Minecraft resource-pack UUID remains namespace-stable; only the hosted identifier changes when ZIP content changes. This separates client pack identity from immutable content routing.
 
-Before registration, `HostedPackStore` verifies the final split ZIP and materializes `hosted/<sha1>.zip`. All blobs are materialized before any new IDs are registered.
+Before registration, `HostedPackStore` resolves each current pack to its canonical `hosted/<sha1>.zip` path. New blobs were already atomically committed by `PackSplitter`; verified cached blobs are reused in place.
 
 The AutoHost adapter calls:
 
@@ -533,18 +540,19 @@ Public `PolymerResourcePackUtils.buildMain(...)` was not substituted for `genera
 The desired failure mode is degradation to normal Polymer behavior, not partial split delivery.
 
 - Invalid/missing Polymer output: split generation fails.
-- Missing/malformed startup cache metadata: cached publication is skipped.
-- Any cached namespace with an invalid path, UUID, size, SHA-1, or missing valid generation/hosted file invalidates the entire startup restore.
-- Interrupted temporary files and incomplete non-current generation directories are cleaned on startup on a best-effort basis.
+- Missing/malformed format-2 index metadata: cached publication is skipped.
+- Any cached namespace with an invalid UUID, size, fingerprint, SHA-1, or missing/corrupted hosted blob invalidates the entire startup restore.
+- Interrupted temporary files are cleaned on startup on a best-effort basis.
+- Invalid legacy TSV/generation data is not partially migrated.
 - Invalid `pack.mcmeta` overlay metadata: split generation fails.
 - Unsupported root/overlay directory content: split generation fails.
 - Empty namespace set: split generation fails.
 - Namespace ZIP failure: whole new generation is not published.
 - AutoHost registration failure: whole new registry is not published.
 - Disabled, external, empty, or unknown/custom AutoHost provider: split publication is blocked and the original Polymer delivery path is not suppressed.
-- Cache-index write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
-- Startup cache read/verify/repair failure: cached publication is skipped and Polymer's main pack remains the fallback.
-- Old generation cleanup failure: ignored for delivery purposes.
+- `index.json` write failure during publication: the new generation is not published and the coordinator becomes `FAILED`.
+- Startup index read/verification or legacy migration failure: cached publication is skipped and Polymer's main pack remains the fallback.
+- Legacy-artifact or unreferenced-blob cleanup failure: ignored for delivery purposes.
 - Polymer reports output issues on modern versions: split generation is marked failed.
 
 ## 18. Known limitations
@@ -559,11 +567,11 @@ Declared resource-pack overlays are preserved and routed by namespace, and ordin
 
 ### Namespace and hosted-entry retirement
 
-Within a running server, historical content-addressed AutoHost mappings and `hosted/<sha1>.zip` blobs are retained so an already issued URL continues to resolve to the same bytes. They are not part of the active namespace set: collectors read only the current `SplitGeneration`.
+Within a running server, historical content-addressed AutoHost mappings and hosted blobs are retained so an already issued URL continues to resolve to the same bytes. They are not part of the active namespace set: collectors read only the current `SplitGeneration`.
 
-When the Minecraft server fully stops, PolymerSplitter removes only its own `polymersplitter/packs/*` entries from AutoHost's in-memory hosted-file map and resets its in-memory coordinator/registry to `NOT_STARTED`. Disk cache and immutable hosted blobs remain available for validated recovery on the next server start, including same-JVM restarts.
+When the Minecraft server fully stops, PolymerSplitter removes only its own `polymersplitter/packs/*` entries from AutoHost's in-memory hosted-file map and resets its in-memory coordinator/registry to `NOT_STARTED`. `index.json` and immutable blobs remain available for validated recovery on the next server start, including same-JVM restarts.
 
-Automatic disk garbage collection of historical hosted blobs remains deferred to an operational cleanup phase.
+After a successful later startup restore, unreferenced hosted blobs from prior processes are garbage-collected on a best-effort basis. Runtime rebuilds never perform this GC.
 
 ### External provider
 

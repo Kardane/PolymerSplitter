@@ -25,10 +25,11 @@ Update `ARCHITECTURE.md` in the same change when lifecycle, caching, identity, h
 - Use final ZIP SHA-1 for content metadata and content-addressed AutoHost IDs.
 - Never remap an already issued content-addressed URL to different bytes.
 - Treat one `CoordinatorSnapshot` (state + active generation + failure + namespace transition) as the atomic runtime snapshot. `SplitRegistry` is a read-only view of that same snapshot.
-- Keep cache loading explicit: `SplitCacheIndex.read()` is side-effect-free metadata parsing; file verification and repair are separate phases.
-- Publish only after hosting, generation reconciliation, and cache-index commit succeed.
+- `hosted/<sha1>.zip` is the only persistent split-ZIP store. Do not reintroduce generation-directory copies.
+- Keep cache loading explicit: `SplitCacheIndex.read()` parses `index.json` without filesystem mutation; `verify()` hashes referenced blobs. Mutation belongs only to generation, legacy migration, or explicit cleanup.
+- Publish only after content-addressed blobs, AutoHost registration, and the atomic `index.json` commit succeed.
 - Broken generation/cache/provider state must degrade to Polymer's original main-pack path, never partial split delivery.
-- Keep historical hosted URLs valid while a server is running; clear only PolymerSplitter-owned in-memory mappings after full server stop.
+- Keep historical hosted blobs/URLs valid while a server is running. Garbage-collect unreferenced blobs only after a successful startup restore or another explicitly safe lifecycle point.
 - Prefer public Polymer APIs. Direct `.impl` access is allowed only in the compatibility shims and the documented main-pack suppression Mixins listed in `POLYMER_COMPATIBILITY.md`.
 - Do not put Minecraft or Polymer types in `common`.
 

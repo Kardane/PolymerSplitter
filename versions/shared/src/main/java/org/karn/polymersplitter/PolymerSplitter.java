@@ -96,8 +96,6 @@ public final class PolymerSplitter implements ModInitializer {
                     "Failed to clean interrupted PolymerSplitter temporary files", e);
         }
 
-        String restoredHash = null;
-
         if (hosting.supported()) {
             try {
                 var restored = coordinator.restore(
@@ -108,32 +106,29 @@ public final class PolymerSplitter implements ModInitializer {
                 );
 
                 if (restored.isPresent()) {
-                    restoredHash = coordinator.sourceHash();
                     LOGGER.log(System.Logger.Level.INFO,
                             "Restored cached split generation: packs=" + restored.get().size()
-                                    + ", sourceSha1=" + restoredHash);
+                                    + ", sourceSha1=" + coordinator.sourceHash());
+
+                    try {
+                        int deletedBlobs = SplitRecovery.cleanupUnreferencedHostedBlobs(
+                                coordinator.outputRoot(),
+                                restored.get()
+                        );
+                        if (deletedBlobs > 0) {
+                            LOGGER.log(System.Logger.Level.INFO,
+                                    "Removed " + deletedBlobs + " unreferenced hosted blob(s)");
+                        }
+                    } catch (IOException | RuntimeException e) {
+                        LOGGER.log(System.Logger.Level.WARNING,
+                                "Failed to clean unreferenced PolymerSplitter hosted blobs", e);
+                    }
                 }
             } catch (IOException | RuntimeException e) {
                 LOGGER.log(System.Logger.Level.WARNING,
                         "Cached split generation could not be restored; Polymer main pack remains the fallback",
                         e);
             }
-        }
-
-        try {
-            int deletedGenerations = SplitRecovery.cleanupIncompleteGenerations(
-                    coordinator.outputRoot(),
-                    restoredHash
-            );
-
-            if (deletedGenerations > 0) {
-                LOGGER.log(System.Logger.Level.INFO,
-                        "Removed " + deletedGenerations + " incomplete generation director"
-                                + (deletedGenerations == 1 ? "y" : "ies"));
-            }
-        } catch (IOException | RuntimeException e) {
-            LOGGER.log(System.Logger.Level.WARNING,
-                    "Failed to clean incomplete PolymerSplitter generations", e);
         }
     }
 
