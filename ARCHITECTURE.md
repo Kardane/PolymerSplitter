@@ -43,6 +43,7 @@ common/
     SplitterConfig
     PackHashUtil
     PackIdUtil
+    HostedPackStore
     SplitPackManifest
     SplitCacheIndex
 
@@ -102,6 +103,12 @@ PackSplitter
         +--> write manifest.json
         |
         v
+HostedPackStore
+        |
+        +--> verify final ZIP SHA-1
+        +--> hard-link/copy immutable hosted/<sha1>.zip
+        |
+        v
 PolymerAutoHostBridge.registerHostedPacks
         |
         v
@@ -145,14 +152,15 @@ A generation is published in this order:
 1. Validate the generated Polymer ZIP.
 2. Calculate its SHA-1.
 3. Build or reuse all namespace packs.
-4. Register the resulting files with Polymer AutoHost.
-5. Atomically replace the in-memory `SplitRegistry` list.
-6. Mark the coordinator `READY`.
-7. Persist cache metadata and opportunistically clean old generations.
+4. Materialize every final ZIP into the immutable content-addressed hosted blob store.
+5. Register content-addressed hosted identifiers with Polymer AutoHost.
+6. Atomically replace the in-memory `SplitRegistry` list.
+7. Mark the coordinator `READY`.
+8. Persist cache metadata and opportunistically clean old generation directories.
 
 If steps 1-4 fail, the previous registry remains intact and the coordinator becomes `FAILED`. Main-pack suppression is active only while the coordinator is `READY` and the registry is non-empty.
 
-The registry swap is atomic. Polymer AutoHost's internal hosted-file map is not an atomic multi-entry transaction; see Known limitations.
+The registry swap is atomic. Hosted IDs include the content SHA-1, so partial registration before a failed publication can only add unadvertised immutable IDs; it cannot remap an already advertised URL to different bytes.
 
 ## 7. Split format
 
@@ -283,15 +291,27 @@ If namespace and fingerprint match a previous cached pack and the previous file 
 
 After successful publication, the cache keeps the current generation and the immediately previous generation. Older `generation-<sha1>` directories are removed on a best-effort basis.
 
+AutoHost does not serve generation files directly. Each final split ZIP is materialized into:
+
+```text
+config/polymersplitter/generated/hosted/<sha1>.zip
+```
+
+The hosted copy is immutable and independent from generation-directory cleanup. Hard links are preferred; ordinary copies are used when hard linking is unavailable.
+
 Cache-index read/write/cleanup failures do not invalidate an otherwise valid split generation.
 
 ## 11. Polymer AutoHost integration
 
-Each namespace is registered under a stable hosted identifier:
+Each namespace generation is registered under a content-addressed hosted identifier:
 
 ```text
-polymersplitter:packs/<namespace>
+polymersplitter:packs/<namespace>/<sha1>
 ```
+
+The Minecraft resource-pack UUID remains namespace-stable; only the hosted identifier changes when ZIP content changes. This separates client pack identity from immutable content routing.
+
+Before registration, `HostedPackStore` verifies the final split ZIP and materializes `hosted/<sha1>.zip`. All blobs are materialized before any new IDs are registered.
 
 The AutoHost adapter calls:
 
@@ -414,13 +434,11 @@ Many Polymer mods contribute resources to `assets/minecraft`. As a result, `mine
 
 Declared resource-pack overlays are preserved and routed by namespace, and ordinary root-level files are copied to every split pack. Unknown root directories or unsupported files inside an overlay are intentionally rejected instead of guessed. This can cause a valid-but-unrecognized future pack layout to fall back to Polymer's original main pack until explicit support is added.
 
-### AutoHost hosted-path remapping
+### Hosted blob retention
 
-Polymer AutoHost strips its optional `+<hash>.zip` suffix before resolving the registered hosted identifier. PolymerSplitter reuses a stable identifier per namespace.
+Polymer AutoHost exposes registration but no public unregister API in the supported versions. PolymerSplitter therefore does not automatically delete `hosted/<sha1>.zip` blobs after they have been registered.
 
-During an online rebuild, registering a new generation remaps that identifier before the in-memory split registry is swapped. Consequently, an old in-flight URL can resolve to the newly registered file. Keeping the previous generation on disk does not provide versioned URL routing by itself.
-
-A future solution would require content-addressed hosted identifiers or an upstream AutoHost API that can atomically/versionedly register multiple paths.
+This intentionally favors URL correctness over automatic disk reclamation: an already issued content-addressed URL continues to resolve to the same bytes even after its generation directory is retired. A later lifecycle/operations phase can add conservative garbage collection once stale hosted identifiers can be tracked safely.
 
 ### External provider
 

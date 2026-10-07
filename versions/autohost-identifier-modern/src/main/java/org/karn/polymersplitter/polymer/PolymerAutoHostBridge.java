@@ -7,9 +7,14 @@ import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import net.minecraft.resources.Identifier;
 import org.karn.polymersplitter.common.lifecycle.SplitCoordinator;
 import org.karn.polymersplitter.common.lifecycle.SplitState;
+import org.karn.polymersplitter.common.pack.HostedPackStore;
 import org.karn.polymersplitter.common.pack.SplitPack;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class PolymerAutoHostBridge {
@@ -45,11 +50,30 @@ public final class PolymerAutoHostBridge {
         AutoHostUtils.RESOURCE_PACKS_READY.register((provider, context) ->
                 coordinator.state() != SplitState.GENERATING
         );
+
     }
 
-    public static void registerHostedPacks(List<SplitPack> packs) {
+    public static void registerHostedPacks(
+            Path outputRoot,
+            List<SplitPack> packs
+    ) {
+        final Map<String, Path> hostedFiles;
+
+        try {
+            hostedFiles = HostedPackStore.materialize(outputRoot, packs);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to materialize immutable hosted packs", e);
+        }
+
         for (SplitPack pack : packs) {
-            AutoHostUtils.registerHostedFile(identifier(pack), pack.path());
+            Path hostedPath = hostedFiles.get(pack.sha1());
+            if (hostedPath == null) {
+                throw new IllegalStateException(
+                        "Missing hosted blob for namespace " + pack.namespace()
+                );
+            }
+
+            AutoHostUtils.registerHostedFile(identifier(pack), hostedPath);
         }
     }
 
@@ -80,7 +104,7 @@ public final class PolymerAutoHostBridge {
     private static Identifier identifier(SplitPack pack) {
         return Identifier.fromNamespaceAndPath(
                 HOST_NAMESPACE,
-                HOST_PREFIX + pack.namespace()
+                HOST_PREFIX + pack.namespace() + "/" + pack.sha1()
         );
     }
 }

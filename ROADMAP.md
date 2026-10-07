@@ -62,6 +62,8 @@ Make namespace splitting preserve the semantics of modern resource packs, not on
 
 ## Phase 11 — Atomic/versioned AutoHost hosting
 
+**Status:** completed
+
 Eliminate the online rebuild race caused by stable hosted identifiers being remapped before the split registry is swapped.
 
 ### Scope
@@ -82,6 +84,16 @@ Eliminate the online rebuild race caused by stable hosted identifiers being rema
 - An old split-pack URL never resolves to bytes from a newer generation.
 - Online rebuilds do not create a mixed-generation download window.
 - Previous generation files can be retired safely.
+
+### Implemented
+
+- AutoHost identifiers are content-addressed as `packs/<namespace>/<sha1>`.
+- Namespace/Minecraft pack UUIDs remain stable and independent from the hosted identifier.
+- Final ZIPs are verified and materialized into immutable `generated/hosted/<sha1>.zip` blobs before AutoHost registration.
+- Hosted blobs prefer hard links and fall back to copies.
+- All blobs are materialized before new AutoHost IDs are registered.
+- Generation-directory cleanup can retire old generations without invalidating issued URLs.
+- Hosted blobs are intentionally retained because supported Polymer AutoHost versions do not expose a public unregister API; safe garbage collection is deferred to later lifecycle/operations work.
 
 ## Phase 12 — Recovery and cache restore
 

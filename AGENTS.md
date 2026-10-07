@@ -26,6 +26,7 @@ Preserve these invariants:
 - Keep namespace pack UUIDs stable across content changes.
 - Use Polymer's main resource-pack UUID for the primary split pack (`minecraft` when present).
 - Use the final split ZIP SHA-1 for Polymer/Minecraft pack metadata.
+- Use content-addressed AutoHost identifiers (`packs/<namespace>/<sha1>`) and immutable hosted blobs; never remap an old content URL to new bytes.
 - Do not replace the visible split registry until split generation and AutoHost registration complete.
 - If splitting fails or is not ready, leave Polymer's original main pack available as fallback.
 - Do not remove Polymer external/global resource packs.
