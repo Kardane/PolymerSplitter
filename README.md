@@ -4,7 +4,7 @@ Server-side Fabric companion mod for [Polymer](https://github.com/Patbox/polymer
 
 PolymerSplitter splits Polymer-generated resource packs into independently cacheable packs while leaving hosting and delivery to Polymer AutoHost.
 
-**Status:** Phase 6 main-pack replacement implemented  
+**Status:** Phase 7 cache and generation cleanup implemented  
 **Target:** Minecraft 1.21.8 through 26.3  
 **Client mod:** not required
 

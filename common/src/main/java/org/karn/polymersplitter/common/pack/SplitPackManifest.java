@@ -34,9 +34,9 @@ public final class SplitPackManifest {
                 .sorted(Comparator.comparing(SplitPack::namespace))
                 .toList();
 
-        StringBuilder json = new StringBuilder(256 + sorted.size() * 192);
+        StringBuilder json = new StringBuilder(256 + sorted.size() * 240);
         json.append("{\n");
-        json.append("  \"formatVersion\": 1,\n");
+        json.append("  \"formatVersion\": 2,\n");
         json.append("  \"packs\": [");
 
         if (!sorted.isEmpty()) {
@@ -48,6 +48,7 @@ public final class SplitPackManifest {
             json.append("    {\n");
             json.append("      \"namespace\": \"").append(escape(pack.namespace())).append("\",\n");
             json.append("      \"file\": \"").append(escape(pack.path().getFileName().toString())).append("\",\n");
+            json.append("      \"fingerprint\": \"").append(pack.fingerprint()).append("\",\n");
             json.append("      \"sha1\": \"").append(pack.sha1()).append("\",\n");
             json.append("      \"uuid\": \"").append(pack.uuid()).append("\",\n");
             json.append("      \"size\": ").append(pack.size()).append('\n');

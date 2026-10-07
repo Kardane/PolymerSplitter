@@ -2,6 +2,7 @@ package org.karn.polymersplitter.common.lifecycle;
 
 import org.karn.polymersplitter.common.pack.PackHashUtil;
 import org.karn.polymersplitter.common.pack.PackSplitter;
+import org.karn.polymersplitter.common.pack.SplitCacheIndex;
 import org.karn.polymersplitter.common.pack.SplitPack;
 import org.karn.polymersplitter.common.pack.SplitterConfig;
 
@@ -10,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -68,7 +70,18 @@ public final class SplitCoordinator {
             String hash = PackHashUtil.sha1(normalizedSource);
             Path generationDirectory = outputRoot.resolve("generation-" + hash);
 
-            List<SplitPack> packs = splitter.split(normalizedSource, generationDirectory, config);
+            Optional<SplitCacheIndex.Snapshot> previousCache = readCacheBestEffort();
+            List<SplitPack> reusablePacks = previousCache
+                    .map(SplitCacheIndex.Snapshot::packs)
+                    .orElseGet(List::of);
+
+            List<SplitPack> packs = splitter.split(
+                    normalizedSource,
+                    generationDirectory,
+                    config,
+                    reusablePacks
+            );
+
             if (packs.isEmpty()) {
                 throw new IOException("Generated Polymer resource pack contains no resource namespaces");
             }
@@ -84,10 +97,41 @@ public final class SplitCoordinator {
             sourceHash.set(hash);
             lastFailure.set(null);
             state.set(SplitState.READY);
+
+            persistCacheBestEffort(hash, immutablePacks);
+            cleanupOldGenerationsBestEffort(
+                    hash,
+                    previousCache.map(SplitCacheIndex.Snapshot::sourceHash).orElse(null)
+            );
+
             return immutablePacks;
         } catch (IOException | RuntimeException e) {
             markFailed(e);
             throw e;
+        }
+    }
+
+    private Optional<SplitCacheIndex.Snapshot> readCacheBestEffort() {
+        try {
+            return SplitCacheIndex.read(outputRoot);
+        } catch (IOException | RuntimeException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    private void persistCacheBestEffort(String hash, List<SplitPack> packs) {
+        try {
+            SplitCacheIndex.write(outputRoot, hash, packs);
+        } catch (IOException | RuntimeException ignored) {
+            // Cache metadata must never invalidate an otherwise usable split generation.
+        }
+    }
+
+    private void cleanupOldGenerationsBestEffort(String currentHash, String previousHash) {
+        try {
+            SplitCacheIndex.cleanupOldGenerations(outputRoot, currentHash, previousHash);
+        } catch (IOException | RuntimeException ignored) {
+            // Old cache cleanup is opportunistic and must not affect pack delivery.
         }
     }
 
